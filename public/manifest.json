@@ -1,0 +1,17 @@
+{
+  "name": "Hope Dealers — Life Recovery Society",
+  "short_name": "Hope Dealers",
+  "description": "Love • Pray • Serve • Restore — Giving the Hopeless Hope. Street Ministry Outreach & Community Impact Tracker by Life Recovery Society.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#dc2626",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/hope-dealers-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
