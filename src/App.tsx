@@ -28,7 +28,9 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() =>
     loadCurrentSession()
   );
-  const [activeTab, setActiveTab] = useState<ActiveTab>('walk');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
+    loadCurrentSession() ? 'walk' : 'impact'
+  );
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
@@ -71,6 +73,7 @@ export function App() {
   const handleLoginSuccess = (user: UserAccount) => {
     setCurrentUser(user);
     saveCurrentSession(user);
+    setActiveTab('walk');
     // Also add walk-up volunteer to roster if not present
     setDbState((prev) => {
       const exists = prev.users.some(
@@ -88,7 +91,7 @@ export function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     saveCurrentSession(null);
-    if (activeTab === 'admin') {
+    if (activeTab === 'admin' || activeTab === 'walk') {
       setActiveTab('impact');
     }
   };
@@ -211,17 +214,45 @@ export function App() {
 
       <main className="flex-1">
         {activeTab === 'walk' && (
-          <ActiveWalkTracker
-            currentUser={currentUser}
-            allUsers={dbState.users}
-            lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
-            pins={dbState.pins}
-            onOpenLogin={() => setIsLoginModalOpen(true)}
-            onSaveWalk={handleSaveWalk}
-            onSavePin={handleSavePin}
-            onViewMap={() => setActiveTab('map')}
-            onActiveWalkStateChange={setHasActiveWalkRunning}
-          />
+          currentUser ? (
+            <ActiveWalkTracker
+              currentUser={currentUser}
+              allUsers={dbState.users}
+              lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
+              pins={dbState.pins}
+              onOpenLogin={() => setIsLoginModalOpen(true)}
+              onSaveWalk={handleSaveWalk}
+              onSavePin={handleSavePin}
+              onViewMap={() => setActiveTab('map')}
+              onActiveWalkStateChange={setHasActiveWalkRunning}
+            />
+          ) : (
+            <div className="max-w-lg mx-auto px-4 py-14 text-center space-y-5">
+              <img
+                src="/hope-dealers-logo.png"
+                alt="Hope Dealers Logo"
+                className="h-36 w-auto mx-auto object-contain drop-shadow-2xl"
+              />
+              <div className="p-6 rounded-3xl bg-slateDark-900 border border-slate-800 shadow-2xl space-y-4">
+                <span className="inline-block px-3 py-1 rounded-full bg-phoenix-500/20 border border-phoenix-500/30 text-phoenix-300 text-xs font-extrabold uppercase tracking-wider">
+                  🔒 Volunteer Access Required
+                </span>
+                <h1 className="text-xl sm:text-2xl font-black text-white">
+                  Sign In to Log Walks & Counters
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  Only signed-in Hope Dealers volunteers and Super Users can record street walks, GPS routes, interactions, prayer pins, and trash pickup.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsLoginModalOpen(true)}
+                  className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-phoenix-500 via-phoenix-600 to-phoenix-red hover:from-phoenix-600 hover:to-phoenix-700 text-white font-extrabold text-sm shadow-lg shadow-phoenix-600/30 transition"
+                >
+                  Volunteer / Super User Sign In
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         {activeTab === 'map' && (

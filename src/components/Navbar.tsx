@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Flame,
   Footprints,
+  Lock,
   LogIn,
   LogOut,
   MapPin,
@@ -73,14 +74,21 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Desktop Navigation Pills */}
           <nav className="hidden md:flex items-center gap-1 bg-slateDark-900 p-1 rounded-xl border border-slate-800">
             <button
-              onClick={() => setActiveTab('walk')}
+              onClick={() => {
+                setActiveTab('walk');
+                if (!currentUser) onOpenLogin();
+              }}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
                 activeTab === 'walk'
                   ? 'bg-phoenix-600 text-white shadow-md shadow-phoenix-600/30'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
               }`}
             >
-              <Footprints className="w-4 h-4" />
+              {currentUser ? (
+                <Footprints className="w-4 h-4" />
+              ) : (
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+              )}
               <span>Log Walk & Counters</span>
               {hasActiveWalkRunning && (
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -215,7 +223,10 @@ export const Navbar: React.FC<NavbarProps> = ({
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slateDark-950/95 backdrop-blur-md border-t border-slate-800 px-2 py-1.5 no-print">
         <div className="grid grid-cols-4 gap-1 max-w-md mx-auto">
           <button
-            onClick={() => setActiveTab('walk')}
+            onClick={() => {
+              setActiveTab('walk');
+              if (!currentUser) onOpenLogin();
+            }}
             className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-[11px] font-bold transition ${
               activeTab === 'walk'
                 ? 'bg-phoenix-600/20 text-phoenix-400 border border-phoenix-500/40'
@@ -223,7 +234,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <div className="relative">
-              <Footprints className="w-5 h-5 mb-0.5" />
+              {currentUser ? (
+                <Footprints className="w-5 h-5 mb-0.5" />
+              ) : (
+                <Lock className="w-5 h-5 mb-0.5 text-amber-400" />
+              )}
               {hasActiveWalkRunning && (
                 <span className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               )}
