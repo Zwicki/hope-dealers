@@ -39,7 +39,7 @@ const DEFAULT_CLOUD_CONFIG: CloudConfig = {
   provider: 'cloud_storage',
   supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  customWebhookUrl: '',
+  customWebhookUrl: 'https://liferecoverysociety.org/api/impact-sync',
   teamAccessCode: 'HOPE2026',
   lbsPerTrashBag: 15,
   lastSyncedAt: new Date().toISOString(),
@@ -102,6 +102,8 @@ export function loadDatabase(): AppDatabaseState {
     }
     if (!parsed.cloudConfig) {
       parsed.cloudConfig = DEFAULT_CLOUD_CONFIG;
+    } else if (!parsed.cloudConfig.customWebhookUrl) {
+      parsed.cloudConfig.customWebhookUrl = 'https://liferecoverysociety.org/api/impact-sync';
     }
     return parsed;
   } catch {
