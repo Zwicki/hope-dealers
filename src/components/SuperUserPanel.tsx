@@ -497,18 +497,6 @@ export const SuperUserPanel: React.FC<SuperUserPanelProps> = ({
           <button
             type="button"
             onClick={() => {
-              onRestoreDemoData();
-              showToast('Restored sample Chillicothe walks and prayer pins.');
-            }}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-phoenix-300 text-xs font-bold flex items-center gap-2 border border-slate-700"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Restore Sample Chillicothe Data</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
               if (
                 window.confirm(
                   'Are you sure you want to clear all walk & pin records to start fresh?'
