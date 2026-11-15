@@ -205,6 +205,27 @@ export const SuperUserPanel: React.FC<SuperUserPanelProps> = ({
       <HistoricalOutreachBuilder
         currentUser={currentUser}
         allUsers={users}
+        allKnownPeople={[
+          ...users.map((u) => u.name),
+          ...dbState.walks.flatMap((w) => [w.recorderName, ...w.groupMembers]),
+        ]}
+        onAddNewPerson={(newName) => {
+          const clean = newName.trim();
+          if (!clean) return;
+          const exists = users.some(
+            (u) => u.name.toLowerCase() === clean.toLowerCase()
+          );
+          if (!exists) {
+            onAddUser({
+              id: `vol-${Date.now()}`,
+              name: clean,
+              email: `${clean.toLowerCase().replace(/[^a-z0-9]/g, '.')}@hopedealers.local`,
+              role: 'volunteer',
+              active: true,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }}
         lbsPerTrashBag={cloudConfig.lbsPerTrashBag}
         onSaveHistoricalWalk={onSaveHistoricalWalk}
         onSaveStandalonePin={onSaveStandalonePin}

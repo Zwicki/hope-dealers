@@ -32,11 +32,17 @@ import {
   calculateDistanceMiles,
   reverseGeocodeStreet,
 } from '../services/cloudSyncService';
+import {
+  DateInputWithCalendar,
+  WalkParticipantsSelector,
+} from './WalkFormControls';
 
 interface EditWalkModalProps {
   isOpen: boolean;
   walk: WalkSession | null;
   allUsers: UserAccount[];
+  allKnownPeople?: string[];
+  onAddNewPerson?: (name: string) => void;
   lbsPerTrashBag: number;
   onClose: () => void;
   onSaveWalk: (updatedWalk: WalkSession) => void;
@@ -99,6 +105,8 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
   isOpen,
   walk,
   allUsers,
+  allKnownPeople = [],
+  onAddNewPerson,
   lbsPerTrashBag,
   onClose,
   onSaveWalk,
@@ -277,21 +285,12 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
         <form onSubmit={handleSubmit} className="p-5 space-y-5">
           {/* Date, Duration, Miles & Volunteer Hours */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Walk Date
-              </label>
-              <div className="relative">
-                <Calendar className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="date"
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slateDark-950 border border-slate-700 text-xs text-white"
-                />
-              </div>
-            </div>
+            <DateInputWithCalendar
+              label="Walk Date (Type or Calendar)"
+              required
+              value={date}
+              onChange={setDate}
+            />
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
@@ -348,84 +347,17 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
           </div>
 
           {/* Group Members */}
-          <div className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-2.5">
-            <label className="block text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-phoenix-400" />
-              <span>Group Members ({groupMembers.length})</span>
-            </label>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {groupMembers.map((m) => (
-                <span
-                  key={m}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-phoenix-600/25 border border-phoenix-500/40 text-xs font-bold text-white"
-                >
-                  <span>👟 {m}</span>
-                  {groupMembers.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setGroupMembers((prev) => prev.filter((x) => x !== m))
-                      }
-                      className="hover:text-rose-400"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </span>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {allUsers
-                .filter((u) => !groupMembers.includes(u.name))
-                .map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => setGroupMembers((prev) => [...prev, u.name])}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs text-slate-300 border border-slate-700"
-                  >
-                    + {u.name}
-                  </button>
-                ))}
-              <div className="flex items-center gap-1.5 ml-auto">
-                <input
-                  type="text"
-                  value={newPartnerInput}
-                  onChange={(e) => setNewPartnerInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (newPartnerInput.trim()) {
-                        setGroupMembers((prev) => [
-                          ...prev,
-                          newPartnerInput.trim(),
-                        ]);
-                        setNewPartnerInput('');
-                      }
-                    }
-                  }}
-                  placeholder="Add partner name..."
-                  className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (newPartnerInput.trim()) {
-                      setGroupMembers((prev) => [
-                        ...prev,
-                        newPartnerInput.trim(),
-                      ]);
-                      setNewPartnerInput('');
-                    }
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 text-xs font-bold text-phoenix-300 border border-slate-700"
-                >
-                  <UserPlus className="w-3.5 h-3.5 inline mr-1" />
-                  Add
-                </button>
-              </div>
-            </div>
-          </div>
+          <WalkParticipantsSelector
+            selectedMembers={groupMembers}
+            onChangeMembers={setGroupMembers}
+            allKnownPeople={[
+              ...allUsers.map((u) => u.name),
+              ...allKnownPeople,
+            ]}
+            onAddNewPerson={onAddNewPerson}
+            label="Who Walked in This Group?"
+            helperText="Select multiple people from previous walks, or add a new person"
+          />
 
           {/* Counters */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

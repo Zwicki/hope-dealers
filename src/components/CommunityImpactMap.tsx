@@ -42,6 +42,8 @@ interface CommunityImpactMapProps {
   pins: EncounterPin[];
   currentUser: UserAccount | null;
   allUsers?: UserAccount[];
+  allKnownPeople?: string[];
+  onAddNewPerson?: (name: string) => void;
   lbsPerTrashBag?: number;
   onSaveWalk?: (walk: WalkSession) => void;
   onSavePin: (pin: EncounterPin) => void;
@@ -208,6 +210,8 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   pins,
   currentUser,
   allUsers = [],
+  allKnownPeople = [],
+  onAddNewPerson,
   lbsPerTrashBag = 15,
   onSaveWalk,
   onSavePin,
@@ -976,6 +980,8 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
           onClose={() => setEditingWalk(null)}
           walk={editingWalk}
           allUsers={allUsers}
+          allKnownPeople={allKnownPeople}
+          onAddNewPerson={onAddNewPerson}
           lbsPerTrashBag={lbsPerTrashBag}
           onSaveWalk={onSaveWalk}
         />

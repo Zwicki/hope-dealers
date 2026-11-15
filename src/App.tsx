@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AppDatabaseState,
   CloudConfig,
@@ -96,14 +96,57 @@ export function App() {
     }
   };
 
+  const mergeMembersIntoUsers = (
+    users: UserAccount[],
+    names: string[]
+  ): UserAccount[] => {
+    const nextUsers = [...users];
+    names.forEach((raw) => {
+      const clean = (raw || '').trim();
+      if (!clean) return;
+      const exists = nextUsers.some(
+        (u) => u.name.toLowerCase() === clean.toLowerCase()
+      );
+      if (!exists) {
+        nextUsers.push({
+          id: `vol-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: clean,
+          email: `${clean.toLowerCase().replace(/[^a-z0-9]/g, '.')}@hopedealers.local`,
+          role: 'volunteer',
+          active: true,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    });
+    return nextUsers;
+  };
+
+  const handleAddNewPerson = (name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setDbState((prev) => {
+      const updatedUsers = mergeMembersIntoUsers(prev.users, [clean]);
+      if (updatedUsers.length === prev.users.length) return prev;
+      return saveDatabase({
+        ...prev,
+        users: updatedUsers,
+      });
+    });
+  };
+
   const handleSaveWalk = (walk: WalkSession) => {
     setDbState((prev) => {
       const updatedWalks = [
         walk,
         ...prev.walks.filter((w) => w.id !== walk.id),
       ].sort((a, b) => b.startTime.localeCompare(a.startTime));
+      const updatedUsers = mergeMembersIntoUsers(prev.users, [
+        walk.recorderName,
+        ...(walk.groupMembers || []),
+      ]);
       const updated = saveDatabase({
         ...prev,
+        users: updatedUsers,
         walks: updatedWalks,
       });
       return updated;
@@ -131,8 +174,13 @@ export function App() {
       const updatedPins = [...newPins, ...prev.pins].sort((a, b) =>
         b.timestamp.localeCompare(a.timestamp)
       );
+      const updatedUsers = mergeMembersIntoUsers(prev.users, [
+        walk.recorderName,
+        ...(walk.groupMembers || []),
+      ]);
       return saveDatabase({
         ...prev,
+        users: updatedUsers,
         walks: updatedWalks,
         pins: updatedPins,
       });
@@ -220,6 +268,29 @@ export function App() {
     dbState.walks.filter((w) => w.syncStatus === 'pending').length +
     dbState.pins.filter((p) => p.syncStatus === 'pending').length;
 
+  // Compile all previous people who have walked (from users roster + all saved walks + pins)
+  const allKnownPeople = useMemo(() => {
+    const map = new Map<string, string>();
+    const addName = (raw?: string) => {
+      const clean = (raw || '').trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, clean);
+      }
+    };
+    dbState.users.forEach((u) => addName(u.name));
+    dbState.walks.forEach((w) => {
+      addName(w.recorderName);
+      (w.groupMembers || []).forEach((m) => addName(m));
+    });
+    dbState.pins.forEach((p) => {
+      addName(p.loggedByRecorder);
+      (p.groupMembers || []).forEach((m) => addName(m));
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }, [dbState.users, dbState.walks, dbState.pins]);
+
   return (
     <div className="min-h-screen bg-slateDark-950 text-slate-100 flex flex-col">
       <Navbar
@@ -241,6 +312,8 @@ export function App() {
             <ActiveWalkTracker
               currentUser={currentUser}
               allUsers={dbState.users}
+              allKnownPeople={allKnownPeople}
+              onAddNewPerson={handleAddNewPerson}
               lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
               pins={dbState.pins}
               onOpenLogin={() => setIsLoginModalOpen(true)}
@@ -285,6 +358,8 @@ export function App() {
             pins={dbState.pins}
             currentUser={currentUser}
             allUsers={dbState.users}
+            allKnownPeople={allKnownPeople}
+            onAddNewPerson={handleAddNewPerson}
             lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
             onSaveWalk={handleSaveWalk}
             onSavePin={handleSavePin}
@@ -300,6 +375,8 @@ export function App() {
             pins={dbState.pins}
             currentUser={currentUser}
             allUsers={dbState.users}
+            allKnownPeople={allKnownPeople}
+            onAddNewPerson={handleAddNewPerson}
             lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
             onSaveWalk={handleSaveWalk}
             onSavePin={handleSavePin}

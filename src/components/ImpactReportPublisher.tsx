@@ -31,6 +31,8 @@ interface ImpactReportPublisherProps {
   pins: EncounterPin[];
   currentUser: UserAccount | null;
   allUsers?: UserAccount[];
+  allKnownPeople?: string[];
+  onAddNewPerson?: (name: string) => void;
   lbsPerTrashBag?: number;
   onSaveWalk?: (walk: WalkSession) => void;
   onSavePin?: (pin: EncounterPin) => void;
@@ -44,6 +46,8 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
   pins,
   currentUser,
   allUsers = [],
+  allKnownPeople = [],
+  onAddNewPerson,
   lbsPerTrashBag = 15,
   onSaveWalk,
   onSavePin,
@@ -749,6 +753,8 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
           isOpen={Boolean(editingWalk)}
           walk={editingWalk}
           allUsers={allUsers}
+          allKnownPeople={allKnownPeople}
+          onAddNewPerson={onAddNewPerson}
           lbsPerTrashBag={lbsPerTrashBag}
           onClose={() => setEditingWalk(null)}
           onSaveWalk={onSaveWalk}

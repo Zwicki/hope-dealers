@@ -51,10 +51,13 @@ import {
 } from '../services/cloudSyncService';
 import { EncounterPinModal } from './EncounterPinModal';
 import { HistoricalOutreachBuilder } from './HistoricalOutreachBuilder';
+import { WalkParticipantsSelector } from './WalkFormControls';
 
 interface ActiveWalkTrackerProps {
   currentUser: UserAccount | null;
   allUsers: UserAccount[];
+  allKnownPeople?: string[];
+  onAddNewPerson?: (name: string) => void;
   lbsPerTrashBag: number;
   pins: EncounterPin[];
   onOpenLogin: () => void;
@@ -149,6 +152,8 @@ const RecenterMapHelper: React.FC<{ center: [number, number] | null }> = ({
 export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
   currentUser,
   allUsers,
+  allKnownPeople = [],
+  onAddNewPerson,
   lbsPerTrashBag,
   pins,
   onOpenLogin,
@@ -850,6 +855,8 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         <HistoricalOutreachBuilder
           currentUser={currentUser}
           allUsers={allUsers}
+          allKnownPeople={allKnownPeople}
+          onAddNewPerson={onAddNewPerson}
           lbsPerTrashBag={lbsPerTrashBag}
           onSaveHistoricalWalk={onSaveHistoricalWalk}
           onSaveStandalonePin={onSavePin}
@@ -874,105 +881,18 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         </div>
       )}
 
-      {/* STEP 1: WALKING GROUP ROSTER (2-3 Volunteers Together) */}
-      <section className="p-4 sm:p-5 rounded-2xl bg-slateDark-900 border border-slate-800 shadow-xl space-y-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-phoenix-500/20 border border-phoenix-500/30 flex items-center justify-center text-phoenix-400">
-              <Users className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-extrabold text-white">
-                1. Walking Group Roster (Usually 2–3 Hope Dealers)
-              </h2>
-              <p className="text-[11px] text-slate-400">
-                One person records on their phone — add your 1–2 walking partners below
-              </p>
-            </div>
-          </div>
-
-          <div className="px-3 py-1 rounded-full bg-phoenix-500/15 border border-phoenix-500/30 text-phoenix-300 text-xs font-extrabold">
-            👥 {groupMembers.length}{' '}
-            {groupMembers.length === 1 ? 'Volunteer' : 'Volunteers'} ={' '}
-            {groupMembers.length}x Volunteer Hours
-          </div>
-        </div>
-
-        {/* Active Group Member Pills */}
-        <div className="flex flex-wrap items-center gap-2">
-          {groupMembers.map((member, idx) => (
-            <span
-              key={member}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-phoenix-600/25 border border-phoenix-500/50 text-xs font-bold text-white"
-            >
-              <span>
-                {idx === 0 ? '📱 ' : '👟 '}
-                {member}
-              </span>
-              {idx === 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-phoenix-500/30 text-phoenix-200">
-                  Recorder
-                </span>
-              )}
-              {groupMembers.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => handleRemoveGroupMember(member)}
-                  className="text-slate-300 hover:text-rose-400 ml-0.5"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </span>
-          ))}
-        </div>
-
-        {/* Quick-Add Teammate Chips + Custom Input */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            <span className="text-[11px] font-semibold text-slate-400 shrink-0">
-              Quick add partner:
-            </span>
-            {allUsers
-              .filter((u) => u.active && !groupMembers.includes(u.name))
-              .map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => handleAddGroupMember(u.name)}
-                  className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slateDark-950 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold transition"
-                >
-                  <Plus className="w-3 h-3 text-phoenix-400" />
-                  <span>{u.name}</span>
-                </button>
-              ))}
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:ml-auto">
-            <input
-              type="text"
-              value={newTeammateName}
-              onChange={(e) => setNewTeammateName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddGroupMember(newTeammateName);
-                }
-              }}
-              placeholder="Or type partner name..."
-              className="flex-1 sm:w-44 px-3 py-1.5 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
-            />
-            <button
-              type="button"
-              onClick={() => handleAddGroupMember(newTeammateName)}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1 border border-slate-700"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-phoenix-400" />
-              <span>Add</span>
-            </button>
-          </div>
-        </div>
-      </section>
+      {/* STEP 1: WALKING GROUP ROSTER (Multi-Select Dropdown + Add New Person) */}
+      <WalkParticipantsSelector
+        selectedMembers={groupMembers}
+        onChangeMembers={setGroupMembers}
+        allKnownPeople={[
+          ...allUsers.map((u) => u.name),
+          ...allKnownPeople,
+        ]}
+        onAddNewPerson={onAddNewPerson}
+        label="1. Who Is Involved in This Walk? (Group Roster)"
+        helperText="Open the dropdown to select multiple people from previous walks, or add a new person"
+      />
 
       {/* STEP 2: LIVE GPS TRACKER, STARTING POINT, ROUTE & DISTANCE */}
       <section className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-slateDark-900 via-slateDark-900 to-phoenix-950/30 border border-slate-800 shadow-xl space-y-4">
