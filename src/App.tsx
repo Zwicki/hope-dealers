@@ -116,6 +116,25 @@ export function App() {
     });
   };
 
+  const handleSaveHistoricalWalk = (
+    walk: WalkSession,
+    newPins: EncounterPin[]
+  ) => {
+    setDbState((prev) => {
+      const updatedWalks = [walk, ...prev.walks.filter((w) => w.id !== walk.id)].sort(
+        (a, b) => b.startTime.localeCompare(a.startTime)
+      );
+      const updatedPins = [...newPins, ...prev.pins].sort((a, b) =>
+        b.timestamp.localeCompare(a.timestamp)
+      );
+      return saveDatabase({
+        ...prev,
+        walks: updatedWalks,
+        pins: updatedPins,
+      });
+    });
+  };
+
   const handleDeleteWalk = (walkId: string) => {
     setDbState((prev) => {
       const updated = saveDatabase({
@@ -224,6 +243,11 @@ export function App() {
               onSaveWalk={handleSaveWalk}
               onSavePin={handleSavePin}
               onViewMap={() => setActiveTab('map')}
+              onOpenHistoricalEntry={
+                currentUser.role === 'superuser'
+                  ? () => setActiveTab('admin')
+                  : undefined
+              }
               onActiveWalkStateChange={setHasActiveWalkRunning}
             />
           ) : (
@@ -278,7 +302,10 @@ export function App() {
 
         {activeTab === 'admin' && currentUser?.role === 'superuser' && (
           <SuperUserPanel
+            currentUser={currentUser}
             dbState={dbState}
+            onSaveHistoricalWalk={handleSaveHistoricalWalk}
+            onSaveStandalonePin={handleSavePin}
             onUpdateCloudConfig={handleUpdateCloudConfig}
             onAddUser={handleAddUser}
             onRemoveUser={handleRemoveUser}

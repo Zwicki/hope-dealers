@@ -17,12 +17,18 @@ import {
 import {
   AppDatabaseState,
   CloudConfig,
+  EncounterPin,
   UserAccount,
+  WalkSession,
 } from '../types/hopeDealers';
 import { SUPER_USER_EMAIL } from '../services/cloudSyncService';
+import { HistoricalOutreachBuilder } from './HistoricalOutreachBuilder';
 
 interface SuperUserPanelProps {
+  currentUser: UserAccount;
   dbState: AppDatabaseState;
+  onSaveHistoricalWalk: (walk: WalkSession, newPins: EncounterPin[]) => void;
+  onSaveStandalonePin: (pin: EncounterPin) => void;
   onUpdateCloudConfig: (config: CloudConfig) => void;
   onAddUser: (user: UserAccount) => void;
   onRemoveUser: (userId: string) => void;
@@ -56,7 +62,10 @@ create policy "Allow public read/write for Hope Dealers Pins"
   on public.hope_dealers_pins for all using (true) with check (true);`;
 
 export const SuperUserPanel: React.FC<SuperUserPanelProps> = ({
+  currentUser,
   dbState,
+  onSaveHistoricalWalk,
+  onSaveStandalonePin,
   onUpdateCloudConfig,
   onAddUser,
   onRemoveUser,
@@ -190,6 +199,15 @@ export const SuperUserPanel: React.FC<SuperUserPanelProps> = ({
           ✓ {statusMsg}
         </div>
       )}
+
+      {/* Historical / Past Outreach Entry Builder for Super User */}
+      <HistoricalOutreachBuilder
+        currentUser={currentUser}
+        allUsers={users}
+        lbsPerTrashBag={cloudConfig.lbsPerTrashBag}
+        onSaveHistoricalWalk={onSaveHistoricalWalk}
+        onSaveStandalonePin={onSaveStandalonePin}
+      />
 
       {/* 1. Team Access Code & Outreach Defaults */}
       <form

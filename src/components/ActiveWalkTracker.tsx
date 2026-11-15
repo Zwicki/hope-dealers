@@ -59,6 +59,7 @@ interface ActiveWalkTrackerProps {
   onSaveWalk: (walk: WalkSession) => void;
   onSavePin: (pin: EncounterPin) => void;
   onViewMap: () => void;
+  onOpenHistoricalEntry?: () => void;
   onActiveWalkStateChange: (isRunning: boolean) => void;
 }
 
@@ -151,6 +152,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
   onSaveWalk,
   onSavePin,
   onViewMap,
+  onOpenHistoricalEntry,
   onActiveWalkStateChange,
 }) => {
   const initialDraft = loadActiveWalkDraft();
@@ -789,6 +791,16 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
           >
             <LogIn className="w-4 h-4" />
             <span>Volunteer / Super User Login</span>
+          </button>
+        )}
+
+        {currentUser?.role === 'superuser' && onOpenHistoricalEntry && (
+          <button
+            type="button"
+            onClick={onOpenHistoricalEntry}
+            className="w-full sm:w-auto shrink-0 px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-extrabold text-xs flex items-center justify-center gap-1.5 transition"
+          >
+            <span>📅 + Add Past Walk / Route / Prayers</span>
           </button>
         )}
       </div>
