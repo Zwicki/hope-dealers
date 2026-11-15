@@ -13,10 +13,13 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  CornerUpLeft,
+  Flag,
   Footprints,
   HeartHandshake,
   MapPin,
   Plus,
+  Repeat,
   RotateCcw,
   Route,
   Save,
@@ -48,38 +51,49 @@ interface HistoricalOutreachBuilderProps {
   lbsPerTrashBag: number;
   onSaveHistoricalWalk: (walk: WalkSession, newPins: EncounterPin[]) => void;
   onSaveStandalonePin: (pin: EncounterPin) => void;
+  onViewMap?: () => void;
 }
 
-// Preset coordinates for common Chillicothe streets so tapping street chips can also auto-build a route
-const STREET_COORDS_LOOKUP: Record<string, [number, number]> = {
-  'Paint St': [39.3331, -82.9824],
-  'E Main St': [39.3333, -82.9765],
-  'W Main St': [39.3330, -82.9885],
-  'N Bridge St': [39.3365, -82.9717],
-  'S Bridge St': [39.3295, -82.9719],
-  'E Water St': [39.3361, -82.9795],
-  'W Water St': [39.3359, -82.9875],
-  'Eastern Ave': [39.3278, -82.9675],
-  'Western Ave': [39.3338, -82.9960],
-  'N High St': [39.3372, -82.9895],
-  'S High St': [39.3292, -82.9892],
-  'Mulberry St': [39.3350, -82.9786],
-  'E 2nd St': [39.3348, -82.9772],
-  'W 2nd St': [39.3346, -82.9862],
-  'E 4th St': [39.3316, -82.9755],
-  'E 7th St': [39.3268, -82.9652],
-  'Yoctangee Pkwy': [39.3385, -82.9815],
-  'Scioto Ave': [39.3320, -82.9920],
-  'Watt St': [39.3285, -82.9750],
-  'Ewing St': [39.3315, -82.9788],
-};
+const startFinishIcon = (isClosedLoop: boolean) =>
+  L.divIcon({
+    className: 'hist-start-finish-icon',
+    html: `<div style="
+      width: 34px;
+      height: 34px;
+      border-radius: 9999px;
+      background: ${isClosedLoop ? 'linear-gradient(135deg,#10b981,#059669)' : '#10b981'};
+      border: 3px solid #ffffff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      cursor: pointer;
+    " title="Click to end walk back at Starting Point">🏁</div>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
 
-const startIcon = L.divIcon({
-  className: 'hist-start-icon',
-  html: `<div style="width:28px;height:28px;border-radius:9999px;background:#10b981;border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-size:13px;">🏁</div>`,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-});
+const createWaypointIcon = (index: number) =>
+  L.divIcon({
+    className: 'hist-waypoint-icon',
+    html: `<div style="
+      width: 26px;
+      height: 26px;
+      border-radius: 9999px;
+      background: #f97316;
+      color: #ffffff;
+      border: 2.5px solid #ffffff;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 900;
+    ">${index}</div>`,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+  });
 
 const interactionIcon = L.divIcon({
   className: 'hist-int-icon',
@@ -128,6 +142,7 @@ export const HistoricalOutreachBuilder: React.FC<
   lbsPerTrashBag,
   onSaveHistoricalWalk,
   onSaveStandalonePin,
+  onViewMap,
 }) => {
   const [entryMode, setEntryMode] = useState<'full_walk' | 'standalone_pin'>(
     'full_walk'
@@ -135,35 +150,31 @@ export const HistoricalOutreachBuilder: React.FC<
 
   // Past Walk State
   const [walkDate, setWalkDate] = useState<string>(
-    new Date(Date.now() - 86400000 * 7).toISOString().slice(0, 10)
+    new Date(Date.now() - 86400000).toISOString().slice(0, 10)
   );
-  const [durationMinutes, setDurationMinutes] = useState<number>(120);
-  const [milesWalked, setMilesWalked] = useState<number>(2.0);
+  const [durationMinutes, setDurationMinutes] = useState<number>(90);
+  const [milesWalked, setMilesWalked] = useState<number>(0);
   const [groupMembers, setGroupMembers] = useState<string[]>([
     currentUser.name || 'Rick Fannin',
   ]);
   const [newPartnerInput, setNewPartnerInput] = useState('');
-  const [streetsWalked, setStreetsWalked] = useState<string[]>(['Paint St']);
+  const [streetsWalked, setStreetsWalked] = useState<string[]>([]);
   const [customStreetInput, setCustomStreetInput] = useState('');
 
   // Counters
-  const [interactionsCount, setInteractionsCount] = useState<number>(15);
-  const [prayersCount, setPrayersCount] = useState<number>(3);
-  const [serviceLinkagesCount, setServiceLinkagesCount] = useState<number>(2);
-  const [trashBagsCount, setTrashBagsCount] = useState<number>(2);
-  const [trashWeightLbs, setTrashWeightLbs] = useState<number>(
-    2 * lbsPerTrashBag
-  );
+  const [interactionsCount, setInteractionsCount] = useState<number>(0);
+  const [prayersCount, setPrayersCount] = useState<number>(0);
+  const [serviceLinkagesCount, setServiceLinkagesCount] = useState<number>(0);
+  const [trashBagsCount, setTrashBagsCount] = useState<number>(0);
+  const [trashWeightLbs, setTrashWeightLbs] = useState<number>(0);
   const [notes, setNotes] = useState<string>('');
 
   // Map Click Mode: 'route' | 'interaction' | 'prayer_pin'
   const [mapClickMode, setMapClickMode] = useState<
     'route' | 'interaction' | 'prayer_pin'
   >('route');
-  const [routePoints, setRoutePoints] = useState<[number, number][]>([
-    [39.3318, -82.9824],
-    [39.3348, -82.9823],
-  ]);
+  const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
+  const [isLoopClosed, setIsLoopClosed] = useState<boolean>(false);
   const [interactionSpots, setInteractionSpots] = useState<[number, number][]>(
     []
   );
@@ -174,18 +185,21 @@ export const HistoricalOutreachBuilder: React.FC<
   const [pinType, setPinType] = useState<EncounterType>('both');
   const [pinNeeds, setPinNeeds] = useState<NeedCategoryId[]>([]);
   const [pinDescription, setPinDescription] = useState('');
-  const [pinStreet, setPinStreet] = useState('Paint St');
+  const [pinStreet, setPinStreet] = useState('');
   const [pinCoords, setPinCoords] = useState<[number, number]>(
     CHILLICOTHE_CENTER
   );
   const [standalonePinDate, setStandalonePinDate] = useState<string>(
-    new Date(Date.now() - 86400000 * 3).toISOString().slice(0, 10)
+    new Date(Date.now() - 86400000).toISOString().slice(0, 10)
   );
 
   const [savedToast, setSavedToast] = useState<string | null>(null);
 
   const recomputeRouteMiles = (pts: [number, number][]) => {
-    if (pts.length < 2) return;
+    if (pts.length < 2) {
+      setMilesWalked(0);
+      return;
+    }
     let total = 0;
     for (let i = 1; i < pts.length; i++) {
       total += calculateDistanceMiles(
@@ -195,9 +209,23 @@ export const HistoricalOutreachBuilder: React.FC<
         pts[i][1]
       );
     }
-    if (total > 0.05) {
-      setMilesWalked(Number(total.toFixed(2)));
+    setMilesWalked(Number(total.toFixed(2)));
+  };
+
+  // Close the route loop back to the starting point
+  const handleEndAtStartingPoint = () => {
+    if (routePoints.length < 2) return;
+    const startPt = routePoints[0];
+    const lastPt = routePoints[routePoints.length - 1];
+    // Avoid duplicating if already at startPt
+    if (lastPt[0] === startPt[0] && lastPt[1] === startPt[1]) {
+      setIsLoopClosed(true);
+      return;
     }
+    const closedPts: [number, number][] = [...routePoints, [startPt[0], startPt[1]]];
+    setRoutePoints(closedPts);
+    setIsLoopClosed(true);
+    recomputeRouteMiles(closedPts);
   };
 
   const handleMapClick = async (lat: number, lng: number) => {
@@ -216,35 +244,46 @@ export const HistoricalOutreachBuilder: React.FC<
     if (mapClickMode === 'route') {
       const nextPts: [number, number][] = [...routePoints, [lat, lng]];
       setRoutePoints(nextPts);
+      setIsLoopClosed(false);
       recomputeRouteMiles(nextPts);
+
+      // Also update default prayer pin coords to latest waypoint for convenience
+      setPinCoords([lat, lng]);
+
       const detected = await reverseGeocodeStreet(lat, lng);
-      if (detected && !streetsWalked.includes(detected)) {
-        setStreetsWalked((prev) => [...prev, detected]);
+      if (detected) {
+        setPinStreet(detected);
+        setStreetsWalked((prev) =>
+          prev.includes(detected) ? prev : [...prev, detected]
+        );
       }
     } else if (mapClickMode === 'interaction') {
       setInteractionSpots((prev) => [...prev, [lat, lng]]);
-      setInteractionsCount((c) => Math.max(c, interactionSpots.length + 1));
+      setInteractionsCount((c) => c + 1);
     }
   };
 
-  const handleToggleStreet = (street: string) => {
-    setStreetsWalked((prev) => {
-      const exists = prev.includes(street);
-      const next = exists
-        ? prev.filter((s) => s !== street)
-        : [...prev, street];
-
-      // If adding a known Chillicothe street, also append its coordinates to the route if not already there
-      if (!exists && STREET_COORDS_LOOKUP[street]) {
-        const coord = STREET_COORDS_LOOKUP[street];
-        setRoutePoints((rPrev) => {
-          const nextRoute: [number, number][] = [...rPrev, coord];
-          recomputeRouteMiles(nextRoute);
-          return nextRoute;
-        });
-      }
+  const handleUndoRoutePoint = () => {
+    setRoutePoints((prev) => {
+      const next = prev.slice(0, -1);
+      setIsLoopClosed(false);
+      recomputeRouteMiles(next);
       return next;
     });
+  };
+
+  const handleClearRoute = () => {
+    setRoutePoints([]);
+    setIsLoopClosed(false);
+    setMilesWalked(0);
+  };
+
+  const handleToggleStreet = (street: string) => {
+    setStreetsWalked((prev) =>
+      prev.includes(street)
+        ? prev.filter((s) => s !== street)
+        : [...prev, street]
+    );
   };
 
   const handleAddCustomStreet = (e: React.FormEvent) => {
@@ -267,7 +306,9 @@ export const HistoricalOutreachBuilder: React.FC<
     const cleanName = pinFirstName.trim() || 'Community Friend';
     const cleanDesc =
       pinDescription.trim() ||
-      `Prayed with ${cleanName} on ${pinStreet || 'the street'}.`;
+      `Prayed with ${cleanName} on ${
+        pinStreet || streetsWalked[0] || 'the street'
+      }.`;
 
     const newDraft: DraftPrayerPin = {
       id: `draft-pin-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -283,19 +324,14 @@ export const HistoricalOutreachBuilder: React.FC<
     const nextDrafts = [...draftPins, newDraft];
     setDraftPins(nextDrafts);
     setPrayersCount((c) => Math.max(c, nextDrafts.length));
+    setInteractionsCount((c) => Math.max(c, nextDrafts.length));
     if (pinType === 'service' || pinType === 'both' || pinNeeds.length > 0) {
       setServiceLinkagesCount((c) => c + 1);
     }
 
-    // Reset pin inputs for next person
     setPinFirstName('');
     setPinDescription('');
     setPinNeeds([]);
-    // Slightly offset coords for next pin convenience
-    setPinCoords([
-      Number((pinCoords[0] + 0.0006).toFixed(5)),
-      Number((pinCoords[1] - 0.0005).toFixed(5)),
-    ]);
   };
 
   const handleSaveFullHistoricalWalk = (e: React.FormEvent) => {
@@ -309,13 +345,20 @@ export const HistoricalOutreachBuilder: React.FC<
     const finalRoute: [number, number][] =
       routePoints.length >= 2
         ? routePoints
+        : routePoints.length === 1
+        ? [routePoints[0], routePoints[0]]
         : [
             CHILLICOTHE_CENTER,
-            [CHILLICOTHE_CENTER[0] + 0.0025, CHILLICOTHE_CENTER[1] + 0.0015],
+            [CHILLICOTHE_CENTER[0] + 0.002, CHILLICOTHE_CENTER[1] + 0.0015],
+            CHILLICOTHE_CENTER,
           ];
 
     const groupSize = Math.max(1, groupMembers.length);
     const volHours = Number(((durationMinutes / 60) * groupSize).toFixed(2));
+    const finalMiles =
+      milesWalked > 0
+        ? Number(milesWalked.toFixed(2))
+        : Number(Math.max(0.5, (durationMinutes / 60) * 1.2).toFixed(2));
 
     const builtPins: EncounterPin[] = draftPins.map((dp, idx) => ({
       id: `pin-hist-${Date.now()}-${idx}`,
@@ -341,7 +384,7 @@ export const HistoricalOutreachBuilder: React.FC<
         walkId,
         lat: pt[0],
         lng: pt[1],
-        streetName: streetsWalked[0] || 'Paint St',
+        streetName: streetsWalked[0] || 'Chillicothe Outreach',
         timestamp: startIso,
         kind: 'interaction' as const,
       })),
@@ -368,22 +411,21 @@ export const HistoricalOutreachBuilder: React.FC<
       groupMembers,
       groupSize,
       volunteerHours: volHours,
-      milesWalked: Number(milesWalked.toFixed(2)),
+      milesWalked: finalMiles,
       streetsWalked:
-        streetsWalked.length > 0 ? streetsWalked : ['Downtown Chillicothe'],
+        streetsWalked.length > 0 ? streetsWalked : ['Chillicothe Street Walk'],
       startPoint: {
         lat: finalRoute[0][0],
         lng: finalRoute[0][1],
-        streetName: streetsWalked[0] || 'Paint St',
+        streetName: streetsWalked[0] || 'Starting Point',
         timestamp: startIso,
       },
       endPoint: {
         lat: finalRoute[finalRoute.length - 1][0],
         lng: finalRoute[finalRoute.length - 1][1],
-        streetName:
-          streetsWalked[streetsWalked.length - 1] ||
-          streetsWalked[0] ||
-          'Paint St',
+        streetName: isLoopClosed
+          ? streetsWalked[0] || 'Starting Point'
+          : streetsWalked[streetsWalked.length - 1] || 'End Point',
         timestamp: endIso,
       },
       gpsPath: finalRoute,
@@ -398,11 +440,20 @@ export const HistoricalOutreachBuilder: React.FC<
     };
 
     onSaveHistoricalWalk(newWalk, builtPins);
+    setRoutePoints([]);
+    setIsLoopClosed(false);
+    setMilesWalked(0);
+    setStreetsWalked([]);
     setDraftPins([]);
     setInteractionSpots([]);
+    setInteractionsCount(0);
+    setPrayersCount(0);
+    setServiceLinkagesCount(0);
+    setTrashBagsCount(0);
+    setTrashWeightLbs(0);
     setNotes('');
     setSavedToast(
-      `Saved historical walk for ${walkDate} (${newWalk.milesWalked} mi, ${volHours} vol hrs, and ${builtPins.length} prayer pins)!`
+      `Saved past walk for ${walkDate} (${finalMiles} mi, ${volHours} volunteer hrs, ${builtPins.length} prayer pins)!`
     );
     setTimeout(() => setSavedToast(null), 6000);
   };
@@ -440,8 +491,14 @@ export const HistoricalOutreachBuilder: React.FC<
     setTimeout(() => setSavedToast(null), 5000);
   };
 
+  // Intermediate waypoints (excluding start point, and excluding final point if loop is closed)
+  const intermediateWaypoints = routePoints.slice(
+    1,
+    isLoopClosed ? routePoints.length - 1 : routePoints.length
+  );
+
   return (
-    <section className="p-5 rounded-2xl bg-slateDark-900 border-2 border-phoenix-500/40 shadow-2xl space-y-5">
+    <section className="p-4 sm:p-6 rounded-2xl bg-slateDark-900 border-2 border-phoenix-500/40 shadow-2xl space-y-5">
       {/* Header & Mode Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
         <div className="flex items-center gap-3">
@@ -450,10 +507,10 @@ export const HistoricalOutreachBuilder: React.FC<
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-black text-white">
-              Add Past Walks, Routes & Prayers (Historical Backfill)
+              Log Past Street Walk (Click Start → Waypoints → Return to Start)
             </h2>
             <p className="text-xs text-slate-400">
-              Manually enter street walks, routes, counters, and people prayed for from trips made before this app was created
+              Plot your starting point, waypoints along the streets you walked, and close the loop back at the starting point
             </p>
           </div>
         </div>
@@ -468,7 +525,7 @@ export const HistoricalOutreachBuilder: React.FC<
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            🚶 Add Past Walk + Route + Pins
+            🚶 Log Past Walk & Route
           </button>
           <button
             type="button"
@@ -485,15 +542,264 @@ export const HistoricalOutreachBuilder: React.FC<
       </div>
 
       {savedToast && (
-        <div className="p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-xs sm:text-sm font-bold flex items-center gap-2">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-          <span>{savedToast}</span>
+        <div className="p-4 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-xs sm:text-sm font-bold flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span>{savedToast}</span>
+          </div>
+          {onViewMap && (
+            <button
+              type="button"
+              onClick={onViewMap}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slateDark-950 font-black text-xs shrink-0"
+            >
+              View on Map
+            </button>
+          )}
         </div>
       )}
 
       {entryMode === 'full_walk' ? (
         <form onSubmit={handleSaveFullHistoricalWalk} className="space-y-5">
-          {/* Row 1: Date, Duration, Miles & Volunteer Hours */}
+          {/* STEP 1: INTERACTIVE ROUTE PLOTTER (Start -> Waypoints -> End at Start) */}
+          <div className="p-4 rounded-2xl bg-slateDark-950 border-2 border-slate-800 space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-phoenix-400">
+                  Step 1 • Plot Your Walk Route on the Map
+                </span>
+                <h3 className="text-sm sm:text-base font-black text-white">
+                  {routePoints.length === 0
+                    ? '1️⃣ Click on the map where your walk STARTED (🏁)'
+                    : !isLoopClosed
+                    ? `2️⃣ Click waypoints along the streets you walked (${intermediateWaypoints.length} waypoints), then click "End at Starting Point"`
+                    : '✅ Route Complete! Started, walked waypoints, and ended back at Starting Point'}
+                </h3>
+              </div>
+
+              {/* Map Click Tool Switcher */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMapClickMode('route')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition ${
+                    mapClickMode === 'route'
+                      ? 'bg-phoenix-600 text-white border-phoenix-400 shadow'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🛣️ Plot Route Waypoints
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapClickMode('interaction')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition ${
+                    mapClickMode === 'interaction'
+                      ? 'bg-sky-500 text-slateDark-950 border-sky-300 shadow'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  👋 Drop Interaction ({interactionSpots.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapClickMode('prayer_pin')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition ${
+                    mapClickMode === 'prayer_pin'
+                      ? 'bg-amber-500 text-slateDark-950 border-amber-300 shadow'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🙏 Position Prayer Pin
+                </button>
+              </div>
+            </div>
+
+            {/* Route Action Bar: End at Start, Undo, Clear, Live Distance */}
+            <div className="p-3 rounded-xl bg-slateDark-900 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-bold text-emerald-400">
+                  <Flag className="w-3.5 h-3.5" />
+                  <span>
+                    {routePoints.length === 0
+                      ? 'Start Point: Not set yet (Click map)'
+                      : isLoopClosed
+                      ? 'Loop Closed (Start ➔ Waypoints ➔ Start)'
+                      : `Start Set + ${intermediateWaypoints.length} Waypoint${
+                          intermediateWaypoints.length === 1 ? '' : 's'
+                        }`}
+                  </span>
+                </span>
+
+                <span className="text-slate-300 font-bold">
+                  📏 Route Distance:{' '}
+                  <strong className="text-phoenix-300 text-sm">
+                    {milesWalked} miles
+                  </strong>
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* END AT STARTING POINT BUTTON */}
+                <button
+                  type="button"
+                  disabled={routePoints.length < 2 || isLoopClosed}
+                  onClick={handleEndAtStartingPoint}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-black inline-flex items-center gap-1.5 transition ${
+                    routePoints.length >= 2 && !isLoopClosed
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slateDark-950 shadow-lg shadow-emerald-500/25 animate-pulse'
+                      : isLoopClosed
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-default'
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  <Repeat className="w-3.5 h-3.5" />
+                  <span>
+                    {isLoopClosed
+                      ? '✓ Ended at Starting Point'
+                      : '🔄 End Walk at Starting Point'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={routePoints.length === 0}
+                  onClick={handleUndoRoutePoint}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs font-bold inline-flex items-center gap-1"
+                >
+                  <CornerUpLeft className="w-3.5 h-3.5" />
+                  <span>Undo Last Point</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={routePoints.length === 0}
+                  onClick={handleClearRoute}
+                  className="px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 disabled:opacity-40 text-rose-300 text-xs font-bold inline-flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Route</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Leaflet Map */}
+            <div className="rounded-2xl overflow-hidden border-2 border-slate-800 h-80 sm:h-96 relative">
+              <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-[500] px-3.5 py-1.5 rounded-full bg-slateDark-950/90 backdrop-blur border border-phoenix-500/40 text-[11px] font-extrabold text-phoenix-200 shadow-lg pointer-events-none text-center">
+                {mapClickMode === 'route' &&
+                  (routePoints.length === 0
+                    ? '👆 Click the map to set your 🏁 Starting Point'
+                    : !isLoopClosed
+                    ? '👆 Click waypoints along your route (or click 🏁 Start marker / button above to return to Start)'
+                    : '✅ Loop closed back at Starting Point! You can still add Prayer Pins below.')}
+                {mapClickMode === 'interaction' &&
+                  '👆 Click on the map where you had community interactions'}
+                {mapClickMode === 'prayer_pin' &&
+                  '👆 Click on the map to set the location for the Prayer Pin below'}
+              </div>
+
+              <MapContainer
+                center={CHILLICOTHE_CENTER}
+                zoom={15}
+                scrollWheelZoom={true}
+                className="w-full h-full"
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <MapClickCapture onMapClick={handleMapClick} />
+
+                {/* Starting Point (Clicking it when >= 2 points also closes the loop back to start!) */}
+                {routePoints.length > 0 && (
+                  <Marker
+                    position={routePoints[0]}
+                    icon={startFinishIcon(isLoopClosed)}
+                    eventHandlers={{
+                      click: () => {
+                        if (routePoints.length >= 2 && !isLoopClosed) {
+                          handleEndAtStartingPoint();
+                        }
+                      },
+                    }}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1">
+                        <strong className="text-emerald-400 block">
+                          🏁 {isLoopClosed ? 'Start & Finish Point' : 'Starting Point'}
+                        </strong>
+                        {!isLoopClosed && routePoints.length >= 2 && (
+                          <button
+                            type="button"
+                            onClick={handleEndAtStartingPoint}
+                            className="px-2.5 py-1 rounded bg-emerald-500 text-slateDark-950 font-extrabold text-[11px]"
+                          >
+                            End Walk Here (Close Loop)
+                          </button>
+                        )}
+                      </div>
+                    </Popup>
+                  </Marker>
+                )}
+
+                {/* Numbered Waypoints Along the Way */}
+                {intermediateWaypoints.map((pt, idx) => (
+                  <Marker
+                    key={`wp-${idx}-${pt[0]}-${pt[1]}`}
+                    position={pt}
+                    icon={createWaypointIcon(idx + 1)}
+                  >
+                    <Popup>
+                      <div className="text-xs font-bold">
+                        📍 Waypoint #{idx + 1} ({pt[0].toFixed(4)},{' '}
+                        {pt[1].toFixed(4)})
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+
+                {/* Walked Route Polyline */}
+                {routePoints.length >= 2 && (
+                  <Polyline
+                    positions={routePoints}
+                    pathOptions={{
+                      color: isLoopClosed ? '#10b981' : '#f97316',
+                      weight: 5,
+                      opacity: 0.9,
+                    }}
+                  />
+                )}
+
+                {/* Community Interaction Spots */}
+                {interactionSpots.map((pt, i) => (
+                  <Marker key={i} position={pt} icon={interactionIcon}>
+                    <Popup>👋 Community Interaction #{i + 1}</Popup>
+                  </Marker>
+                ))}
+
+                {/* Draft Prayer Pins */}
+                {draftPins.map((dp) => (
+                  <Marker
+                    key={dp.id}
+                    position={[dp.lat, dp.lng]}
+                    icon={prayerIcon}
+                  >
+                    <Popup>
+                      <strong>🙏 {dp.firstName}</strong>: {dp.description}
+                    </Popup>
+                  </Marker>
+                ))}
+
+                {mapClickMode === 'prayer_pin' && (
+                  <Marker position={pinCoords} icon={prayerIcon}>
+                    <Popup>📍 Selected Prayer Pin Location</Popup>
+                  </Marker>
+                )}
+              </MapContainer>
+            </div>
+          </div>
+
+          {/* STEP 2: DATE, TIME, DISTANCE & GROUP ROSTER */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
@@ -529,18 +835,18 @@ export const HistoricalOutreachBuilder: React.FC<
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                Distance (Miles Walked)
+                Distance (Miles — Auto from Route)
               </label>
               <div className="relative">
                 <Route className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="number"
-                  step="0.1"
-                  min="0.1"
+                  step="0.05"
+                  min="0"
                   required
                   value={milesWalked}
                   onChange={(e) =>
-                    setMilesWalked(Math.max(0.1, parseFloat(e.target.value) || 1))
+                    setMilesWalked(Math.max(0, parseFloat(e.target.value) || 0))
                   }
                   className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slateDark-950 border border-slate-700 text-xs sm:text-sm font-bold text-emerald-400"
                 />
@@ -549,7 +855,7 @@ export const HistoricalOutreachBuilder: React.FC<
 
             <div className="p-2.5 rounded-xl bg-slateDark-950 border border-slate-800 flex flex-col justify-center">
               <span className="text-[11px] font-bold text-slate-400">
-                Auto Total Volunteer Hours:
+                Total Volunteer Hours:
               </span>
               <span className="text-lg font-black text-amber-300">
                 {Number(
@@ -565,7 +871,7 @@ export const HistoricalOutreachBuilder: React.FC<
             </div>
           </div>
 
-          {/* Row 2: Group Members Roster */}
+          {/* Group Members Roster */}
           <div className="p-4 rounded-xl bg-slateDark-950 border border-slate-800 space-y-2.5">
             <label className="block text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <Users className="w-4 h-4 text-phoenix-400" />
@@ -622,7 +928,7 @@ export const HistoricalOutreachBuilder: React.FC<
                       }
                     }
                   }}
-                  placeholder="Add partner name..."
+                  placeholder="Type partner name..."
                   className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
                 />
                 <button
@@ -645,7 +951,7 @@ export const HistoricalOutreachBuilder: React.FC<
             </div>
           </div>
 
-          {/* Row 3: Walk Counters */}
+          {/* STEP 3: WALK COUNTERS */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div>
               <label className="block text-[11px] font-bold text-blue-300 mb-1">
@@ -727,14 +1033,33 @@ export const HistoricalOutreachBuilder: React.FC<
             </div>
           </div>
 
-          {/* Row 4: Streets Walked */}
+          {/* Streets Walked (Auto-detected from waypoints + manual tags) */}
           <div className="p-4 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3">
             <label className="block text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <Footprints className="w-4 h-4 text-emerald-400" />
               <span>
-                Streets Walked (Tapping a street also adds it to the route line!)
+                Streets Walked (Auto-filled as you click waypoints on the map, or tap below)
               </span>
             </label>
+            {streetsWalked.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {streetsWalked.map((st) => (
+                  <span
+                    key={st}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-phoenix-500/20 border border-phoenix-500/40 text-xs font-bold text-phoenix-200"
+                  >
+                    <span>📍 {st}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStreet(st)}
+                      className="hover:text-rose-400"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {COMMON_STREETS_PRESETS.map((st) => {
                 const active = streetsWalked.includes(st);
@@ -778,153 +1103,18 @@ export const HistoricalOutreachBuilder: React.FC<
             </div>
           </div>
 
-          {/* Row 5: Interactive Route, Interaction & Prayer Pin Map Designer */}
-          <div className="p-4 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-xs sm:text-sm font-extrabold text-white">
-                  Interactive Past Route & Pin Map Designer
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Choose what clicking on the map does below: draw your walked route, drop interaction spots, or place a prayer pin
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setMapClickMode('route')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${
-                    mapClickMode === 'route'
-                      ? 'bg-phoenix-600 text-white border-phoenix-400'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  🛣️ Click Map to Draw Route ({routePoints.length} pts)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMapClickMode('interaction')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${
-                    mapClickMode === 'interaction'
-                      ? 'bg-sky-500 text-slateDark-950 border-sky-300'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  👋 Click Map to Add Interaction ({interactionSpots.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMapClickMode('prayer_pin')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${
-                    mapClickMode === 'prayer_pin'
-                      ? 'bg-amber-500 text-slateDark-950 border-amber-300'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  🙏 Click Map to Position Prayer Pin
-                </button>
-              </div>
-            </div>
-
-            {/* Route Undo / Clear Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="text-slate-400">
-                {mapClickMode === 'route' &&
-                  '👆 Click along the streets on the map to trace the route you walked (first point is 🏁 Start Point).'}
-                {mapClickMode === 'interaction' &&
-                  '👆 Click on the map wherever your group had community interactions.'}
-                {mapClickMode === 'prayer_pin' &&
-                  `👆 Click on the map to set the location for the Prayer Pin form below (${pinCoords[0].toFixed(
-                    4
-                  )}, ${pinCoords[1].toFixed(4)}).`}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoutePoints((prev) => prev.slice(0, -1));
-                  }}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 inline-flex items-center gap-1"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Undo Route Point</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRoutePoints([])}
-                  className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300"
-                >
-                  Clear Route
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-xl overflow-hidden border border-slate-800 h-72">
-              <MapContainer
-                center={CHILLICOTHE_CENTER}
-                zoom={15}
-                scrollWheelZoom={true}
-                className="w-full h-full"
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <MapClickCapture onMapClick={handleMapClick} />
-
-                {routePoints.length > 0 && (
-                  <Marker position={routePoints[0]} icon={startIcon}>
-                    <Popup>🏁 Walk Starting Point</Popup>
-                  </Marker>
-                )}
-
-                {routePoints.length >= 2 && (
-                  <Polyline
-                    positions={routePoints}
-                    pathOptions={{ color: '#f97316', weight: 5, opacity: 0.9 }}
-                  />
-                )}
-
-                {interactionSpots.map((pt, i) => (
-                  <Marker key={i} position={pt} icon={interactionIcon}>
-                    <Popup>👋 Community Interaction #{i + 1}</Popup>
-                  </Marker>
-                ))}
-
-                {draftPins.map((dp) => (
-                  <Marker
-                    key={dp.id}
-                    position={[dp.lat, dp.lng]}
-                    icon={prayerIcon}
-                  >
-                    <Popup>
-                      <strong>🙏 {dp.firstName}</strong>: {dp.description}
-                    </Popup>
-                  </Marker>
-                ))}
-
-                {mapClickMode === 'prayer_pin' && (
-                  <Marker position={pinCoords} icon={prayerIcon}>
-                    <Popup>📍 Selected Prayer Pin Location</Popup>
-                  </Marker>
-                )}
-              </MapContainer>
-            </div>
-          </div>
-
-          {/* Row 6: Add People Prayed For / Service Linkages on This Past Walk */}
+          {/* STEP 4: ADD PEOPLE PRAYED FOR / LINKED ON THIS PAST WALK */}
           <div className="p-4 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3.5">
             <div className="flex items-center justify-between">
               <h3 className="text-xs sm:text-sm font-extrabold text-amber-300 flex items-center gap-1.5">
                 <HeartHandshake className="w-4 h-4" />
                 <span>
-                  Add People Prayed For / Linked on This Past Walk (
+                  People Prayed For / Linked on This Past Walk (
                   {draftPins.length} added)
                 </span>
               </h3>
               <span className="text-[11px] text-slate-400">
-                Add as many people as you prayed with on this walk
+                Optional — add each person you prayed for on this walk
               </span>
             </div>
 
@@ -995,7 +1185,6 @@ export const HistoricalOutreachBuilder: React.FC<
               </button>
             </div>
 
-            {/* List of Added Draft Pins */}
             {draftPins.length > 0 && (
               <div className="space-y-1.5 pt-2">
                 {draftPins.map((dp) => (
@@ -1047,7 +1236,8 @@ export const HistoricalOutreachBuilder: React.FC<
           >
             <Save className="w-5 h-5" />
             <span>
-              Save Historical Walk, Route & {draftPins.length} Prayer Pins to Cloud
+              Save Past Walk, Route ({milesWalked} mi) & {draftPins.length} Prayer
+              Pins to Cloud
             </span>
           </button>
         </form>

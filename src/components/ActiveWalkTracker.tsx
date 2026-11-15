@@ -50,6 +50,7 @@ import {
   saveActiveWalkDraft,
 } from '../services/cloudSyncService';
 import { EncounterPinModal } from './EncounterPinModal';
+import { HistoricalOutreachBuilder } from './HistoricalOutreachBuilder';
 
 interface ActiveWalkTrackerProps {
   currentUser: UserAccount | null;
@@ -58,6 +59,7 @@ interface ActiveWalkTrackerProps {
   pins: EncounterPin[];
   onOpenLogin: () => void;
   onSaveWalk: (walk: WalkSession) => void;
+  onSaveHistoricalWalk?: (walk: WalkSession, newPins: EncounterPin[]) => void;
   onSavePin: (pin: EncounterPin) => void;
   onViewMap: () => void;
   onOpenHistoricalEntry?: () => void;
@@ -151,11 +153,12 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
   pins,
   onOpenLogin,
   onSaveWalk,
+  onSaveHistoricalWalk,
   onSavePin,
   onViewMap,
-  onOpenHistoricalEntry,
   onActiveWalkStateChange,
 }) => {
+  const [walkLoggingMode, setWalkLoggingMode] = useState<'live' | 'past'>('live');
   const initialDraft = loadActiveWalkDraft();
 
   const [walkId, setWalkId] = useState<string>(
@@ -808,17 +811,52 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
             <span>Volunteer / Super User Login</span>
           </button>
         )}
+      </div>
 
-        {currentUser?.role === 'superuser' && onOpenHistoricalEntry && (
+      {/* Mode Switcher: Live GPS Walk vs. Log Past Walk (Start -> Waypoints -> End at Start) */}
+      {currentUser && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slateDark-900 p-2 rounded-2xl border border-slate-800 shadow-lg">
           <button
             type="button"
-            onClick={onOpenHistoricalEntry}
-            className="w-full sm:w-auto shrink-0 px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-extrabold text-xs flex items-center justify-center gap-1.5 transition"
+            onClick={() => setWalkLoggingMode('live')}
+            className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition ${
+              walkLoggingMode === 'live'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slateDark-950 shadow-md'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+            }`}
           >
-            <span>📅 + Add Past Walk / Route / Prayers</span>
+            <Navigation className="w-4 h-4" />
+            <span>📡 Live GPS Walk (Walking Right Now)</span>
           </button>
-        )}
-      </div>
+
+          <button
+            type="button"
+            onClick={() => setWalkLoggingMode('past')}
+            className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition ${
+              walkLoggingMode === 'past'
+                ? 'bg-gradient-to-r from-phoenix-500 to-phoenix-red text-white shadow-md'
+                : 'text-amber-300 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Flag className="w-4 h-4" />
+            <span>
+              📅 Log Past Walk (Click Start → Waypoints → Return to Start)
+            </span>
+          </button>
+        </div>
+      )}
+
+      {walkLoggingMode === 'past' && currentUser && onSaveHistoricalWalk ? (
+        <HistoricalOutreachBuilder
+          currentUser={currentUser}
+          allUsers={allUsers}
+          lbsPerTrashBag={lbsPerTrashBag}
+          onSaveHistoricalWalk={onSaveHistoricalWalk}
+          onSaveStandalonePin={onSavePin}
+          onViewMap={onViewMap}
+        />
+      ) : (
+        <>
 
       {/* Toast Notification Banner */}
       {savedBanner && (
@@ -1582,6 +1620,8 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         editingPin={editingPin}
         onSavePin={handlePinCreated}
       />
+        </>
+      )}
     </div>
   );
 };

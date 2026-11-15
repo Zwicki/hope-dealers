@@ -241,13 +241,9 @@ export function App() {
               pins={dbState.pins}
               onOpenLogin={() => setIsLoginModalOpen(true)}
               onSaveWalk={handleSaveWalk}
+              onSaveHistoricalWalk={handleSaveHistoricalWalk}
               onSavePin={handleSavePin}
               onViewMap={() => setActiveTab('map')}
-              onOpenHistoricalEntry={
-                currentUser.role === 'superuser'
-                  ? () => setActiveTab('admin')
-                  : undefined
-              }
               onActiveWalkStateChange={setHasActiveWalkRunning}
             />
           ) : (
