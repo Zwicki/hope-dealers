@@ -24,11 +24,15 @@ import {
   WalkSession,
 } from '../types/hopeDealers';
 import { EncounterPinModal } from './EncounterPinModal';
+import { EditWalkModal } from './EditWalkModal';
 
 interface ImpactReportPublisherProps {
   walks: WalkSession[];
   pins: EncounterPin[];
   currentUser: UserAccount | null;
+  allUsers?: UserAccount[];
+  lbsPerTrashBag?: number;
+  onSaveWalk?: (walk: WalkSession) => void;
   onSavePin?: (pin: EncounterPin) => void;
   onDeletePin?: (pinId: string) => void;
   onDeleteWalk?: (walkId: string) => void;
@@ -39,6 +43,9 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
   walks,
   pins,
   currentUser,
+  allUsers = [],
+  lbsPerTrashBag = 15,
+  onSaveWalk,
   onSavePin,
   onDeletePin,
   onDeleteWalk,
@@ -49,6 +56,7 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [copiedSocial, setCopiedSocial] = useState(false);
   const [editingPin, setEditingPin] = useState<EncounterPin | null>(null);
+  const [editingWalk, setEditingWalk] = useState<WalkSession | null>(null);
 
   // Filter walks and pins by chosen period
   const { filteredWalks, filteredPins, periodLabel } = useMemo(() => {
@@ -577,6 +585,17 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
                     <Clock className="w-3.5 h-3.5" />
                     {walk.durationMinutes} mins ({walk.volunteerHours} Vol. Hrs)
                   </span>
+                  {currentUser?.role === 'superuser' && onSaveWalk && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingWalk(walk)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold inline-flex items-center gap-1 no-print"
+                      title="Edit Walk Record"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit Walk</span>
+                    </button>
+                  )}
                   {currentUser?.role === 'superuser' && onDeleteWalk && (
                     <button
                       type="button"
@@ -722,6 +741,17 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
           lastKnownGps={[editingPin.lat, editingPin.lng]}
           editingPin={editingPin}
           onSavePin={onSavePin}
+        />
+      )}
+
+      {editingWalk && onSaveWalk && (
+        <EditWalkModal
+          isOpen={Boolean(editingWalk)}
+          walk={editingWalk}
+          allUsers={allUsers}
+          lbsPerTrashBag={lbsPerTrashBag}
+          onClose={() => setEditingWalk(null)}
+          onSaveWalk={onSaveWalk}
         />
       )}
     </div>

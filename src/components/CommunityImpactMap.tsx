@@ -35,11 +35,15 @@ import {
   WalkSession,
 } from '../types/hopeDealers';
 import { EncounterPinModal } from './EncounterPinModal';
+import { EditWalkModal } from './EditWalkModal';
 
 interface CommunityImpactMapProps {
   walks: WalkSession[];
   pins: EncounterPin[];
   currentUser: UserAccount | null;
+  allUsers?: UserAccount[];
+  lbsPerTrashBag?: number;
+  onSaveWalk?: (walk: WalkSession) => void;
   onSavePin: (pin: EncounterPin) => void;
   onDeletePin?: (pinId: string) => void;
   onDeleteWalk?: (walkId: string) => void;
@@ -203,6 +207,9 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   walks,
   pins,
   currentUser,
+  allUsers = [],
+  lbsPerTrashBag = 15,
+  onSaveWalk,
   onSavePin,
   onDeletePin,
   onDeleteWalk,
@@ -221,6 +228,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   );
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [editingPin, setEditingPin] = useState<EncounterPin | null>(null);
+  const [editingWalk, setEditingWalk] = useState<WalkSession | null>(null);
   const [focusedPath, setFocusedPath] = useState<[number, number][] | null>(
     null
   );
@@ -777,6 +785,17 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                             🎯 Zoom to Route
                           </button>
                         )}
+                        {currentUser?.role === 'superuser' && onSaveWalk && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingWalk(w)}
+                            className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold inline-flex items-center gap-1"
+                            title="Edit Walk"
+                          >
+                            <Pencil className="w-2.5 h-2.5" />
+                            <span>Edit</span>
+                          </button>
+                        )}
                         {currentUser?.role === 'superuser' && onDeleteWalk && (
                           <button
                             type="button"
@@ -949,6 +968,18 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
         editingPin={editingPin}
         onSavePin={onSavePin}
       />
+
+      {/* Modal for Editing a Saved Walk */}
+      {onSaveWalk && (
+        <EditWalkModal
+          isOpen={Boolean(editingWalk)}
+          onClose={() => setEditingWalk(null)}
+          walk={editingWalk}
+          allUsers={allUsers}
+          lbsPerTrashBag={lbsPerTrashBag}
+          onSaveWalk={onSaveWalk}
+        />
+      )}
     </div>
   );
 };

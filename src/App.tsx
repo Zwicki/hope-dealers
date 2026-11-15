@@ -98,9 +98,13 @@ export function App() {
 
   const handleSaveWalk = (walk: WalkSession) => {
     setDbState((prev) => {
+      const updatedWalks = [
+        walk,
+        ...prev.walks.filter((w) => w.id !== walk.id),
+      ].sort((a, b) => b.startTime.localeCompare(a.startTime));
       const updated = saveDatabase({
         ...prev,
-        walks: [walk, ...prev.walks.filter((w) => w.id !== walk.id)],
+        walks: updatedWalks,
       });
       return updated;
     });
@@ -280,6 +284,9 @@ export function App() {
             walks={dbState.walks}
             pins={dbState.pins}
             currentUser={currentUser}
+            allUsers={dbState.users}
+            lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
+            onSaveWalk={handleSaveWalk}
             onSavePin={handleSavePin}
             onDeletePin={handleDeletePin}
             onDeleteWalk={handleDeleteWalk}
@@ -292,6 +299,9 @@ export function App() {
             walks={dbState.walks}
             pins={dbState.pins}
             currentUser={currentUser}
+            allUsers={dbState.users}
+            lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
+            onSaveWalk={handleSaveWalk}
             onSavePin={handleSavePin}
             onDeletePin={handleDeletePin}
             onDeleteWalk={handleDeleteWalk}
