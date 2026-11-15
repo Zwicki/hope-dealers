@@ -22,6 +22,7 @@ import {
   Minus,
   Navigation,
   Pause,
+  Pencil,
   Play,
   Plus,
   Route,
@@ -235,6 +236,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
 
   // Modals & notifications
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [editingPin, setEditingPin] = useState<EncounterPin | null>(null);
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
 
   const watchIdRef = useRef<number | null>(null);
@@ -581,44 +583,57 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
   };
 
   const handlePinCreated = (pin: EncounterPin) => {
+    const isEditing = Boolean(editingPin);
     onSavePin(pin);
-    setInteractionsCount((c) => c + 1);
-    if (pin.type === 'prayer' || pin.type === 'both') {
-      setPrayersCount((c) => c + 1);
-    }
-    if (
-      pin.type === 'service' ||
-      pin.type === 'both' ||
-      pin.needCategories.length > 0
-    ) {
-      setServiceLinkagesCount((c) => c + 1);
-    }
-    if (pin.streetName && !streetsWalked.includes(pin.streetName)) {
-      setStreetsWalked((prev) => [...prev, pin.streetName]);
-    }
-
-    // Also add pin GPS coordinate to route & interactionLocations
-    const intPoint: CommunityInteractionPoint = {
-      id: `int-pin-${pin.id}`,
-      walkId,
-      lat: pin.lat,
-      lng: pin.lng,
-      streetName: pin.streetName,
-      timestamp: pin.timestamp,
-      kind: pin.type === 'service' ? 'service' : 'prayer',
-    };
-    setInteractionLocations((prev) => [...prev, intPoint]);
-    setGpsPath((prev) => {
-      if (prev.length === 0) return [[pin.lat, pin.lng]];
-      const [lastLat, lastLng] = prev[prev.length - 1];
-      const segMiles = calculateDistanceMiles(lastLat, lastLng, pin.lat, pin.lng);
-      if (segMiles >= 0.002 && !manualMilesOverride) {
-        setMilesWalked((m) => Number((m + segMiles).toFixed(2)));
+    if (!isEditing) {
+      setInteractionsCount((c) => c + 1);
+      if (pin.type === 'prayer' || pin.type === 'both') {
+        setPrayersCount((c) => c + 1);
       }
-      return [...prev, [pin.lat, pin.lng]];
-    });
+      if (
+        pin.type === 'service' ||
+        pin.type === 'both' ||
+        pin.needCategories.length > 0
+      ) {
+        setServiceLinkagesCount((c) => c + 1);
+      }
+      if (pin.streetName && !streetsWalked.includes(pin.streetName)) {
+        setStreetsWalked((prev) => [...prev, pin.streetName]);
+      }
 
-    setSavedBanner(`Saved GPS pin for ${pin.firstName} on ${pin.streetName}!`);
+      // Also add pin GPS coordinate to route & interactionLocations
+      const intPoint: CommunityInteractionPoint = {
+        id: `int-pin-${pin.id}`,
+        walkId,
+        lat: pin.lat,
+        lng: pin.lng,
+        streetName: pin.streetName,
+        timestamp: pin.timestamp,
+        kind: pin.type === 'service' ? 'service' : 'prayer',
+      };
+      setInteractionLocations((prev) => [...prev, intPoint]);
+      setGpsPath((prev) => {
+        if (prev.length === 0) return [[pin.lat, pin.lng]];
+        const [lastLat, lastLng] = prev[prev.length - 1];
+        const segMiles = calculateDistanceMiles(
+          lastLat,
+          lastLng,
+          pin.lat,
+          pin.lng
+        );
+        if (segMiles >= 0.002 && !manualMilesOverride) {
+          setMilesWalked((m) => Number((m + segMiles).toFixed(2)));
+        }
+        return [...prev, [pin.lat, pin.lng]];
+      });
+    }
+    setEditingPin(null);
+
+    setSavedBanner(
+      isEditing
+        ? `Updated prayer record for ${pin.firstName}!`
+        : `Saved GPS pin for ${pin.firstName} on ${pin.streetName}!`
+    );
     setTimeout(() => setSavedBanner(null), 4500);
   };
 
@@ -1495,6 +1510,20 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
                     </div>
                   )}
                 </div>
+
+                {currentUser?.role === 'superuser' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingPin(pin);
+                      setIsPinModalOpen(true);
+                    }}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold inline-flex items-center gap-1"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Edit</span>
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1541,12 +1570,16 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
       {/* Encounter Pin Modal */}
       <EncounterPinModal
         isOpen={isPinModalOpen}
-        onClose={() => setIsPinModalOpen(false)}
+        onClose={() => {
+          setIsPinModalOpen(false);
+          setEditingPin(null);
+        }}
         walkId={walkId}
         recorderName={currentUser?.name || groupMembers[0] || 'Hope Dealer'}
         groupMembers={groupMembers}
         currentWalkStreets={streetsWalked}
         lastKnownGps={lastKnownGps}
+        editingPin={editingPin}
         onSavePin={handlePinCreated}
       />
     </div>

@@ -295,6 +295,8 @@ export function App() {
             walks={dbState.walks}
             pins={dbState.pins}
             currentUser={currentUser}
+            onSavePin={handleSavePin}
+            onDeletePin={handleDeletePin}
             onDeleteWalk={handleDeleteWalk}
             onViewMap={() => setActiveTab('map')}
           />

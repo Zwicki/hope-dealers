@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Calendar,
   Check,
   ExternalLink,
   HeartHandshake,
@@ -30,6 +31,7 @@ interface EncounterPinModalProps {
   groupMembers: string[];
   currentWalkStreets: string[];
   lastKnownGps: [number, number] | null;
+  editingPin?: EncounterPin | null;
   onSavePin: (pin: EncounterPin) => void;
 }
 
@@ -41,6 +43,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
   groupMembers,
   currentWalkStreets,
   lastKnownGps,
+  editingPin,
   onSavePin,
 }) => {
   const [firstName, setFirstName] = useState('');
@@ -48,18 +51,31 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
   const [selectedNeeds, setSelectedNeeds] = useState<NeedCategoryId[]>([]);
   const [description, setDescription] = useState('');
   const [streetName, setStreetName] = useState('');
+  const [pinDate, setPinDate] = useState(new Date().toISOString().slice(0, 10));
   const [coords, setCoords] = useState<[number, number]>(CHILLICOTHE_CENTER);
   const [locatingGps, setLocatingGps] = useState(false);
   const [isListeningVoice, setIsListeningVoice] = useState(false);
 
-  // Initialize coordinates and street when modal opens
+  // Initialize coordinates and fields when modal opens or editingPin changes
   useEffect(() => {
     if (!isOpen) return;
+
+    if (editingPin) {
+      setFirstName(editingPin.firstName);
+      setEncounterType(editingPin.type);
+      setSelectedNeeds(editingPin.needCategories || []);
+      setDescription(editingPin.description);
+      setStreetName(editingPin.streetName);
+      setPinDate(editingPin.timestamp.slice(0, 10));
+      setCoords([editingPin.lat, editingPin.lng]);
+      return;
+    }
 
     setFirstName('');
     setEncounterType('both');
     setSelectedNeeds([]);
     setDescription('');
+    setPinDate(new Date().toISOString().slice(0, 10));
 
     const defaultStreet =
       currentWalkStreets.length > 0
@@ -84,7 +100,6 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
           if (road) setStreetName(road);
         },
         () => {
-          // Slight random offset around downtown Chillicothe if GPS is unavailable on desktop
           const jitterLat = CHILLICOTHE_CENTER[0] + (Math.random() - 0.5) * 0.008;
           const jitterLng = CHILLICOTHE_CENTER[1] + (Math.random() - 0.5) * 0.008;
           setCoords([Number(jitterLat.toFixed(5)), Number(jitterLng.toFixed(5))]);
@@ -93,17 +108,14 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
         { enableHighAccuracy: true, timeout: 6000 }
       );
     }
-  }, [isOpen, lastKnownGps, currentWalkStreets]);
+  }, [isOpen, editingPin, lastKnownGps, currentWalkStreets]);
 
   if (!isOpen) return null;
 
   const toggleNeed = (id: NeedCategoryId) => {
-    setSelectedNeeds((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((item) => item !== id)
-        : [...prev, id];
-      return next;
-    });
+    setSelectedNeeds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
   };
 
   const handleRefreshGps = () => {
@@ -127,8 +139,12 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
 
   const handleVoiceToText = () => {
     const SpeechRecognition =
-      (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown })
-        .SpeechRecognition ||
+      (
+        window as unknown as {
+          SpeechRecognition?: unknown;
+          webkitSpeechRecognition?: unknown;
+        }
+      ).SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: unknown })
         .webkitSpeechRecognition;
 
@@ -182,10 +198,14 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
         ? `Prayed with ${cleanName} on ${streetName || 'the street'}.`
         : `Connected ${cleanName} with community resources and prayed together.`);
 
-    const newPin: EncounterPin = {
-      id: `pin-${Date.now()}`,
-      walkId,
-      timestamp: new Date().toISOString(),
+    const updatedTimestamp = editingPin
+      ? `${pinDate}${editingPin.timestamp.slice(10)}`
+      : new Date().toISOString();
+
+    const savedPin: EncounterPin = {
+      id: editingPin ? editingPin.id : `pin-${Date.now()}`,
+      walkId: editingPin ? editingPin.walkId : walkId,
+      timestamp: updatedTimestamp,
       lat: coords[0],
       lng: coords[1],
       streetName: streetName.trim() || 'Chillicothe Outreach',
@@ -193,12 +213,12 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       description: cleanDesc,
       type: encounterType,
       needCategories: selectedNeeds,
-      loggedByRecorder: recorderName,
-      groupMembers,
+      loggedByRecorder: editingPin ? editingPin.loggedByRecorder : recorderName,
+      groupMembers: editingPin ? editingPin.groupMembers : groupMembers,
       syncStatus: navigator.onLine ? 'synced' : 'pending',
     };
 
-    onSavePin(newPin);
+    onSavePin(savedPin);
     onClose();
   };
 
@@ -213,10 +233,14 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-extrabold text-white leading-tight">
-                Log Prayer & Service Pin
+                {editingPin
+                  ? `Edit Prayer & Service Record (${editingPin.firstName})`
+                  : 'Log Prayer & Service Pin'}
               </h3>
               <p className="text-[11px] text-slate-400">
-                Drops a pin on the map & updates your walk counters automatically
+                {editingPin
+                  ? 'Update name, prayer description, needs, street, or GPS coordinates'
+                  : 'Drops a pin on the map & updates your walk counters automatically'}
               </p>
             </div>
           </div>
@@ -230,29 +254,31 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {/* Quick Community Resource Launcher Bar */}
-          <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs text-emerald-200 font-medium">
-              Need to look up shelter, food, or treatment right now?
+          {!editingPin && (
+            <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-emerald-200 font-medium">
+                Need to look up shelter, food, or treatment right now?
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href="https://chillicothecommunityresources.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slateDark-950 font-extrabold text-xs transition shadow"
+                >
+                  <span>Open Resource Directory</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <a
+                  href="tel:988"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-xs transition"
+                >
+                  <PhoneCall className="w-3.5 h-3.5" />
+                  <span>988</span>
+                </a>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <a
-                href="https://chillicothecommunityresources.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-slateDark-950 font-extrabold text-xs transition shadow"
-              >
-                <span>Open Resource Directory</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-              <a
-                href="tel:988"
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-xs transition"
-              >
-                <PhoneCall className="w-3.5 h-3.5" />
-                <span>988</span>
-              </a>
-            </div>
-          </div>
+          )}
 
           {/* 1. Encounter Type Toggle */}
           <div>
@@ -298,31 +324,50 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             </div>
           </div>
 
-          {/* 2. First Name of Person */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                2. First Name of Person Prayed For
-              </label>
-              <button
-                type="button"
-                onClick={() => setFirstName('Friend (Anonymous)')}
-                className="text-[11px] font-semibold text-phoenix-400 hover:text-phoenix-300 underline"
-              >
-                Tap if Anonymous
-              </button>
+          {/* 2. First Name of Person & Date (when editing) */}
+          <div className={editingPin ? 'grid grid-cols-1 sm:grid-cols-3 gap-3' : ''}>
+            <div className={editingPin ? 'sm:col-span-2' : ''}>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  2. First Name of Person Prayed For
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setFirstName('Friend (Anonymous)')}
+                  className="text-[11px] font-semibold text-phoenix-400 hover:text-phoenix-300 underline"
+                >
+                  Tap if Anonymous
+                </button>
+              </div>
+              <div className="relative">
+                <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="Enter first name (e.g., Marcus, Tiffany...)"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slateDark-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
+                />
+              </div>
             </div>
-            <div className="relative">
-              <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                required
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Enter first name (e.g., Marcus, Tiffany...)"
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-slateDark-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
-              />
-            </div>
+
+            {editingPin && (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Date
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="date"
+                    value={pinDate}
+                    onChange={(e) => setPinDate(e.target.value)}
+                    className="w-full pl-9 pr-3 py-3 rounded-xl bg-slateDark-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-phoenix-500"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 3. Quick-Tap Immediate Needs / Service Linkages */}
@@ -419,6 +464,45 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
               className="w-full px-3 py-2 rounded-lg bg-slateDark-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
             />
 
+            {editingPin && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-0.5">
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={coords[0]}
+                    onChange={(e) =>
+                      setCoords([
+                        parseFloat(e.target.value) || CHILLICOTHE_CENTER[0],
+                        coords[1],
+                      ])
+                    }
+                    className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-0.5">
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={coords[1]}
+                    onChange={(e) =>
+                      setCoords([
+                        coords[0],
+                        parseFloat(e.target.value) || CHILLICOTHE_CENTER[1],
+                      ])
+                    }
+                    className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white"
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Quick Street Chips */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
               {(currentWalkStreets.length > 0
@@ -447,7 +531,11 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             className="w-full py-4 rounded-2xl bg-gradient-to-r from-phoenix-500 via-phoenix-600 to-phoenix-red hover:from-phoenix-600 hover:to-phoenix-700 text-white font-black text-base shadow-xl shadow-phoenix-600/30 flex items-center justify-center gap-2 transition active:scale-[0.99]"
           >
             <Sparkles className="w-5 h-5" />
-            <span>Save Prayer & Drop Map Pin</span>
+            <span>
+              {editingPin
+                ? 'Save Changes to Prayer Record'
+                : 'Save Prayer & Drop Map Pin'}
+            </span>
           </button>
         </form>
       </div>

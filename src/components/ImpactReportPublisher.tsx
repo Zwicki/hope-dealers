@@ -10,6 +10,7 @@ import {
   Footprints,
   HeartHandshake,
   MapPin,
+  Pencil,
   Printer,
   Share2,
   Sparkles,
@@ -22,11 +23,14 @@ import {
   UserAccount,
   WalkSession,
 } from '../types/hopeDealers';
+import { EncounterPinModal } from './EncounterPinModal';
 
 interface ImpactReportPublisherProps {
   walks: WalkSession[];
   pins: EncounterPin[];
   currentUser: UserAccount | null;
+  onSavePin?: (pin: EncounterPin) => void;
+  onDeletePin?: (pinId: string) => void;
   onDeleteWalk?: (walkId: string) => void;
   onViewMap: () => void;
 }
@@ -35,6 +39,8 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
   walks,
   pins,
   currentUser,
+  onSavePin,
+  onDeletePin,
   onDeleteWalk,
   onViewMap,
 }) => {
@@ -42,6 +48,7 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
   const [startDate, setStartDate] = useState('2026-01-01');
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [copiedSocial, setCopiedSocial] = useState(false);
+  const [editingPin, setEditingPin] = useState<EncounterPin | null>(null);
 
   // Filter walks and pins by chosen period
   const { filteredWalks, filteredPins, periodLabel } = useMemo(() => {
@@ -671,13 +678,51 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
                 <p className="text-xs text-slate-200 leading-relaxed">
                   {pin.description}
                 </p>
-                <div className="text-[11px] text-slate-400 pt-1 flex items-center justify-between">
+                <div className="text-[11px] text-slate-400 pt-1 flex items-center justify-between gap-2">
                   <span>👥 Group: {pin.groupMembers.join(', ')}</span>
+                  {currentUser.role === 'superuser' && (
+                    <div className="flex items-center gap-1.5 no-print">
+                      {onSavePin && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingPin(pin)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold inline-flex items-center gap-1"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Edit Prayer</span>
+                        </button>
+                      )}
+                      {onDeletePin && (
+                        <button
+                          type="button"
+                          onClick={() => onDeletePin(pin.id)}
+                          className="p-1 rounded-lg bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400"
+                          title="Delete Prayer Record"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </section>
+      )}
+
+      {editingPin && onSavePin && (
+        <EncounterPinModal
+          isOpen={Boolean(editingPin)}
+          onClose={() => setEditingPin(null)}
+          walkId={editingPin.walkId}
+          recorderName={editingPin.loggedByRecorder}
+          groupMembers={editingPin.groupMembers}
+          currentWalkStreets={[editingPin.streetName]}
+          lastKnownGps={[editingPin.lat, editingPin.lng]}
+          editingPin={editingPin}
+          onSavePin={onSavePin}
+        />
       )}
     </div>
   );

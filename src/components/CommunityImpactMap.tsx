@@ -17,6 +17,7 @@ import {
   HeartHandshake,
   Lock,
   MapPin,
+  Pencil,
   PlusCircle,
   Search,
   Sparkles,
@@ -146,6 +147,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
     null
   );
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [editingPin, setEditingPin] = useState<EncounterPin | null>(null);
 
   const filteredPins = useMemo(() => {
     return pins.filter((p) => {
@@ -577,15 +579,30 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                       📍 {pin.streetName} ({pin.lat.toFixed(4)},{' '}
                       {pin.lng.toFixed(4)})
                     </span>
-                    {currentUser?.role === 'superuser' && onDeletePin && (
-                      <button
-                        type="button"
-                        onClick={() => onDeletePin(pin.id)}
-                        className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-0.5"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>Delete</span>
-                      </button>
+                    {currentUser?.role === 'superuser' && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPin(pin);
+                            setIsPinModalOpen(true);
+                          }}
+                          className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-0.5"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                        {onDeletePin && (
+                          <button
+                            type="button"
+                            onClick={() => onDeletePin(pin.id)}
+                            className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-0.5"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Delete</span>
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -682,9 +699,24 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                       ) : null;
                     })}
                   </div>
-                  <span className="text-[10px] text-slate-500">
-                    {new Date(pin.timestamp).toLocaleDateString()}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500">
+                      {new Date(pin.timestamp).toLocaleDateString()}
+                    </span>
+                    {currentUser?.role === 'superuser' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPin(pin);
+                          setIsPinModalOpen(true);
+                        }}
+                        className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold inline-flex items-center gap-1"
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -692,15 +724,19 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
         </div>
       </div>
 
-      {/* Modal for Map-Picked Pin */}
+      {/* Modal for Map-Picked or Edited Pin */}
       <EncounterPinModal
         isOpen={isPinModalOpen}
-        onClose={() => setIsPinModalOpen(false)}
+        onClose={() => {
+          setIsPinModalOpen(false);
+          setEditingPin(null);
+        }}
         walkId="walk-map-direct"
         recorderName={currentUser?.name || 'Rick Fannin'}
         groupMembers={[currentUser?.name || 'Rick Fannin']}
         currentWalkStreets={[]}
         lastKnownGps={pickedCoords}
+        editingPin={editingPin}
         onSavePin={onSavePin}
       />
     </div>
