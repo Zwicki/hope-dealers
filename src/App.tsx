@@ -282,6 +282,7 @@ export function App() {
             currentUser={currentUser}
             onSavePin={handleSavePin}
             onDeletePin={handleDeletePin}
+            onDeleteWalk={handleDeleteWalk}
             onOpenLogin={() => setIsLoginModalOpen(true)}
           />
         )}
@@ -304,6 +305,7 @@ export function App() {
             dbState={dbState}
             onSaveHistoricalWalk={handleSaveHistoricalWalk}
             onSaveStandalonePin={handleSavePin}
+            onViewMap={() => setActiveTab('map')}
             onUpdateCloudConfig={handleUpdateCloudConfig}
             onAddUser={handleAddUser}
             onRemoveUser={handleRemoveUser}

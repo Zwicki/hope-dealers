@@ -1,14 +1,16 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   MapContainer,
   TileLayer,
   Polyline,
   Marker,
   Popup,
+  useMap,
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
 import {
+  Crosshair,
   Eye,
   EyeOff,
   Filter,
@@ -19,6 +21,7 @@ import {
   MapPin,
   Pencil,
   PlusCircle,
+  Route,
   Search,
   Sparkles,
   Trash2,
@@ -39,6 +42,7 @@ interface CommunityImpactMapProps {
   currentUser: UserAccount | null;
   onSavePin: (pin: EncounterPin) => void;
   onDeletePin?: (pinId: string) => void;
+  onDeleteWalk?: (walkId: string) => void;
   onOpenLogin: () => void;
 }
 
@@ -75,21 +79,43 @@ function createPinIcon(type: 'prayer' | 'service' | 'both') {
 const startFlagIcon = L.divIcon({
   className: 'custom-start-flag',
   html: `<div style="
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     border-radius: 9999px;
     background: #10b981;
-    border: 2px solid #ffffff;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.45);
+    border: 2.5px solid #ffffff;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 14px;
   ">🏁</div>`,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-  popupAnchor: [0, -12],
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+  popupAnchor: [0, -14],
 });
+
+const createRouteWaypointIcon = (num: number) =>
+  L.divIcon({
+    className: 'custom-route-waypoint',
+    html: `<div style="
+      width: 22px;
+      height: 22px;
+      border-radius: 9999px;
+      background: #f97316;
+      color: #ffffff;
+      border: 2px solid #ffffff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+    ">${num}</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -10],
+  });
 
 const communityInteractionIcon = L.divIcon({
   className: 'custom-interaction-dot',
@@ -127,12 +153,59 @@ const MapClickWatcher: React.FC<{
   return null;
 };
 
+// Automatically fit map bounds to all walks and pins (or a specifically focused walk route)
+const AutoFitMapBounds: React.FC<{
+  walks: WalkSession[];
+  pins: EncounterPin[];
+  focusedPath: [number, number][] | null;
+}> = ({ walks, pins, focusedPath }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (focusedPath && focusedPath.length > 0) {
+      const bounds = L.latLngBounds(focusedPath);
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
+      }
+      return;
+    }
+
+    const allCoords: [number, number][] = [];
+    walks.forEach((w) => {
+      if (w.startPoint) {
+        allCoords.push([w.startPoint.lat, w.startPoint.lng]);
+      }
+      (w.gpsPath || []).forEach((pt) => {
+        if (Array.isArray(pt) && pt.length === 2) {
+          allCoords.push([pt[0], pt[1]]);
+        }
+      });
+      (w.interactionLocations || []).forEach((loc) => {
+        allCoords.push([loc.lat, loc.lng]);
+      });
+    });
+    pins.forEach((p) => {
+      allCoords.push([p.lat, p.lng]);
+    });
+
+    if (allCoords.length > 0) {
+      const bounds = L.latLngBounds(allCoords);
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      }
+    }
+  }, [walks, pins, focusedPath, map]);
+
+  return null;
+};
+
 export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   walks,
   pins,
   currentUser,
   onSavePin,
   onDeletePin,
+  onDeleteWalk,
   onOpenLogin,
 }) => {
   const [filterType, setFilterType] = useState<
@@ -148,6 +221,9 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   );
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [editingPin, setEditingPin] = useState<EncounterPin | null>(null);
+  const [focusedPath, setFocusedPath] = useState<[number, number][] | null>(
+    null
+  );
 
   const filteredPins = useMemo(() => {
     return pins.filter((p) => {
@@ -189,6 +265,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   const handleMapLocationPicked = (coords: [number, number]) => {
     setPickedCoords(coords);
     setTapToPinMode(false);
+    setEditingPin(null);
     setIsPinModalOpen(true);
   };
 
@@ -222,7 +299,10 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Tracking GPS starting points (🏁), walked routes & distances, community interaction spots (👋), and prayer/service pins (🙏/✨).
+            Showing {walks.length} logged walk route{walks.length === 1 ? '' : 's'},{' '}
+            {pins.length} prayer/service pin{pins.length === 1 ? '' : 's'}, and{' '}
+            {allInteractionSpots.length} community interaction spot
+            {allInteractionSpots.length === 1 ? '' : 's'}.
           </p>
         </div>
 
@@ -258,6 +338,15 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
 
           <button
             type="button"
+            onClick={() => setFocusedPath(null)}
+            className="px-3 py-2 rounded-xl text-xs font-bold bg-slateDark-950 hover:bg-slate-800 text-slate-200 border border-slate-700 transition"
+          >
+            <Crosshair className="w-3.5 h-3.5 inline mr-1 text-phoenix-400" />
+            Fit All Routes
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowRoutes((r) => !r)}
             className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${
               showRoutes
@@ -266,7 +355,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             }`}
           >
             <Footprints className="w-3.5 h-3.5 inline mr-1" />
-            Routes {showRoutes ? 'ON' : 'OFF'}
+            Routes ({walks.length}) {showRoutes ? 'ON' : 'OFF'}
           </button>
 
           <button
@@ -279,7 +368,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             }`}
           >
             <Flag className="w-3.5 h-3.5 inline mr-1" />
-            Start Points {showStartPoints ? 'ON' : 'OFF'}
+            Start & Waypoints {showStartPoints ? 'ON' : 'OFF'}
           </button>
 
           <button
@@ -386,6 +475,12 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
+          <AutoFitMapBounds
+            walks={walks}
+            pins={pins}
+            focusedPath={focusedPath}
+          />
+
           <MapClickWatcher
             enabled={tapToPinMode}
             onLocationPicked={handleMapLocationPicked}
@@ -401,14 +496,14 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                   pathOptions={{
                     color: '#f97316',
                     weight: 6,
-                    opacity: 0.82,
+                    opacity: 0.88,
                     lineCap: 'round',
                   }}
                 >
                   <Popup>
                     <div className="space-y-1.5 min-w-[210px]">
                       <div className="text-xs font-extrabold text-phoenix-400 uppercase">
-                        🚶 Hope Dealers GPS Route
+                        🚶 Hope Dealers Street Route
                       </div>
                       <div className="text-xs font-bold text-white">
                         {walk.streetsWalked.join(' • ')}
@@ -421,7 +516,8 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                         </div>
                       )}
                       <div className="text-[11px] text-slate-300">
-                        📅 {walk.date} • <strong>{walk.milesWalked} GPS miles</strong> •{' '}
+                        📅 {walk.date} •{' '}
+                        <strong>{walk.milesWalked} miles</strong> •{' '}
                         {walk.durationMinutes} mins
                       </div>
                       <div className="text-[11px] text-amber-300 font-semibold">
@@ -442,7 +538,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
               ) : null
             )}
 
-          {/* Starting Point Markers (🏁) for Each Walk */}
+          {/* Starting Point Markers (🏁) and Route Waypoints for Each Walk */}
           {showStartPoints &&
             walks.map((walk) => {
               const sp =
@@ -455,30 +551,63 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                       timestamp: walk.startTime,
                     }
                   : null);
-              if (!sp) return null;
+
+              const waypoints = (walk.gpsPath || []).slice(1);
+
               return (
-                <Marker
-                  key={`start-${walk.id}`}
-                  position={[sp.lat, sp.lng]}
-                  icon={startFlagIcon}
-                >
-                  <Popup>
-                    <div className="space-y-1 min-w-[190px]">
-                      <div className="text-xs font-extrabold text-emerald-400">
-                        🏁 Walk Starting Point
-                      </div>
-                      <div className="text-xs font-bold text-white">
-                        📍 {sp.streetName || walk.streetsWalked[0]}
-                      </div>
-                      <div className="text-[11px] text-slate-300">
-                        📅 {walk.date} • Route Distance: {walk.milesWalked} mi
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        GPS: {sp.lat.toFixed(4)}, {sp.lng.toFixed(4)}
-                      </div>
-                    </div>
-                  </Popup>
-                </Marker>
+                <React.Fragment key={`route-pts-${walk.id}`}>
+                  {sp && (
+                    <Marker position={[sp.lat, sp.lng]} icon={startFlagIcon}>
+                      <Popup>
+                        <div className="space-y-1 min-w-[190px]">
+                          <div className="text-xs font-extrabold text-emerald-400">
+                            🏁 Walk Starting Point
+                          </div>
+                          <div className="text-xs font-bold text-white">
+                            📍 {sp.streetName || walk.streetsWalked[0]}
+                          </div>
+                          <div className="text-[11px] text-slate-300">
+                            📅 {walk.date} • Route Distance: {walk.milesWalked} mi
+                          </div>
+                          <div className="text-[11px] text-amber-300">
+                            👥 {walk.groupMembers.join(', ')}
+                          </div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  )}
+
+                  {waypoints.map((pt, idx) => {
+                    // Don't overlap start flag if last waypoint returned to exact start point
+                    if (
+                      sp &&
+                      idx === waypoints.length - 1 &&
+                      Math.abs(pt[0] - sp.lat) < 0.0001 &&
+                      Math.abs(pt[1] - sp.lng) < 0.0001
+                    ) {
+                      return null;
+                    }
+                    return (
+                      <Marker
+                        key={`wp-${walk.id}-${idx}`}
+                        position={pt}
+                        icon={createRouteWaypointIcon(idx + 1)}
+                      >
+                        <Popup>
+                          <div className="text-xs space-y-1">
+                            <strong className="text-phoenix-400 block">
+                              📍 Route Waypoint #{idx + 1}
+                            </strong>
+                            <div>📅 {walk.date}</div>
+                            <div className="text-[11px] text-slate-300">
+                              Streets: {walk.streetsWalked.join(', ')}
+                            </div>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    );
+                  })}
+                </React.Fragment>
               );
             })}
 
@@ -612,35 +741,100 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
         </MapContainer>
       </div>
 
-      {/* Streets Walked Directory & Prayer Log Cards Below Map */}
+      {/* Logged Walk Routes, Streets Covered & Prayer Log Cards Below Map */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Streets Walked Cloud */}
-        <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 space-y-3">
-          <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-            <Footprints className="w-4 h-4 text-phoenix-400" />
-            <span>All Streets Covered ({allUniqueStreets.length})</span>
-          </h3>
-          <div className="flex flex-wrap gap-1.5">
-            {allUniqueStreets.map((st) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() =>
-                  setSearchQuery((prev) => (prev === st ? '' : st))
-                }
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition ${
-                  searchQuery === st
-                    ? 'bg-phoenix-600 text-white border-phoenix-400'
-                    : 'bg-slateDark-950 border-slate-800 text-slate-300 hover:border-phoenix-500/50'
-                }`}
-              >
-                📍 {st}
-              </button>
-            ))}
+        {/* Column 1: Logged Walks & Routes + Streets Covered */}
+        <div className="space-y-4">
+          {/* Logged Walks & Routes List */}
+          <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 space-y-3">
+            <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+              <Route className="w-4 h-4 text-phoenix-400" />
+              <span>Logged Walks & Routes ({walks.length})</span>
+            </h3>
+
+            {walks.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                No walks logged yet. Sign in and go to "Log Walk & Counters" to record a live or past walk!
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {walks.map((w) => (
+                  <div
+                    key={w.id}
+                    className="p-3 rounded-xl bg-slateDark-950 border border-slate-800 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-phoenix-300">
+                        📅 {w.date} • {w.milesWalked} mi
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {w.gpsPath && w.gpsPath.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setFocusedPath([...w.gpsPath])}
+                            className="px-2 py-0.5 rounded bg-phoenix-500/20 hover:bg-phoenix-500/30 text-phoenix-300 text-[10px] font-bold"
+                          >
+                            🎯 Zoom to Route
+                          </button>
+                        )}
+                        {currentUser?.role === 'superuser' && onDeleteWalk && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteWalk(w.id)}
+                            className="text-slate-500 hover:text-rose-400"
+                            title="Delete Walk"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-xs font-bold text-white">
+                      📍 {w.streetsWalked.join(' • ')}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      👥 {w.groupMembers.join(', ')} ({w.volunteerHours} Vol. Hrs)
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-[10px] text-slate-300 pt-0.5">
+                      <span>👋 {w.interactionsCount} Int.</span>
+                      <span>🙏 {w.prayersCount} Prayers</span>
+                      <span>🤝 {w.serviceLinkagesCount} Links</span>
+                      <span>🗑️ {w.trashBagsCount} Bags</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Streets Walked Cloud */}
+          <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 space-y-3">
+            <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+              <Footprints className="w-4 h-4 text-emerald-400" />
+              <span>All Streets Covered ({allUniqueStreets.length})</span>
+            </h3>
+            <div className="flex flex-wrap gap-1.5">
+              {allUniqueStreets.map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() =>
+                    setSearchQuery((prev) => (prev === st ? '' : st))
+                  }
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition ${
+                    searchQuery === st
+                      ? 'bg-phoenix-600 text-white border-phoenix-400'
+                      : 'bg-slateDark-950 border-slate-800 text-slate-300 hover:border-phoenix-500/50'
+                  }`}
+                >
+                  📍 {st}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Recent Prayer & Service Encounters Feed */}
+        {/* Column 2 & 3: Recent Prayer & Service Encounters Feed */}
         <div className="lg:col-span-2 p-4 rounded-2xl bg-slateDark-900 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
@@ -658,69 +852,85 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-80 overflow-y-auto pr-1">
-            {filteredPins.map((pin) => (
-              <div
-                key={pin.id}
-                className="p-3 rounded-xl bg-slateDark-950 border border-slate-800 space-y-1.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-extrabold text-xs sm:text-sm text-white">
-                    {currentUser ? `🙏 ${pin.firstName}` : '🙏 Neighbor Prayed With'}
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-phoenix-500/15 text-phoenix-300 font-semibold">
-                    <MapPin className="w-2.5 h-2.5 inline mr-0.5" />
-                    {pin.streetName}
-                  </span>
-                </div>
-
-                {currentUser ? (
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {pin.description}
-                  </p>
-                ) : (
-                  <p className="text-xs text-slate-400">
-                    Hope Dealers team prayed together and shared community support on{' '}
-                    {pin.streetName}.
-                  </p>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-1 pt-1">
-                  <div className="flex flex-wrap gap-1">
-                    {pin.needCategories.map((id) => {
-                      const cat = NEED_CATEGORIES.find((c) => c.id === id);
-                      return cat ? (
-                        <span
-                          key={id}
-                          className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-emerald-300 border border-slate-800"
-                        >
-                          {cat.emoji} {cat.shortLabel}
-                        </span>
-                      ) : null;
-                    })}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-slate-500">
-                      {new Date(pin.timestamp).toLocaleDateString()}
+          {filteredPins.length === 0 ? (
+            <div className="p-6 rounded-xl bg-slateDark-950 border border-slate-800 text-center space-y-2">
+              <p className="text-xs text-slate-400">
+                No individual prayer pins plotted yet. Click{' '}
+                <strong className="text-phoenix-300">"Tap Map to Add Pin"</strong>{' '}
+                above or log a person prayed for during a walk!
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-96 overflow-y-auto pr-1">
+              {filteredPins.map((pin) => (
+                <div
+                  key={pin.id}
+                  className="p-3 rounded-xl bg-slateDark-950 border border-slate-800 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-extrabold text-xs sm:text-sm text-white">
+                      {currentUser
+                        ? `🙏 ${pin.firstName}`
+                        : '🙏 Neighbor Prayed With'}
                     </span>
-                    {currentUser?.role === 'superuser' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingPin(pin);
-                          setIsPinModalOpen(true);
-                        }}
-                        className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold inline-flex items-center gap-1"
-                      >
-                        <Pencil className="w-2.5 h-2.5" />
-                        <span>Edit</span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setFocusedPath([[pin.lat, pin.lng]])}
+                      className="text-[10px] px-2 py-0.5 rounded bg-phoenix-500/15 hover:bg-phoenix-500/25 text-phoenix-300 font-semibold"
+                    >
+                      <MapPin className="w-2.5 h-2.5 inline mr-0.5" />
+                      {pin.streetName}
+                    </button>
+                  </div>
+
+                  {currentUser ? (
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {pin.description}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-400">
+                      Hope Dealers team prayed together and shared community support on{' '}
+                      {pin.streetName}.
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-1 pt-1">
+                    <div className="flex flex-wrap gap-1">
+                      {pin.needCategories.map((id) => {
+                        const cat = NEED_CATEGORIES.find((c) => c.id === id);
+                        return cat ? (
+                          <span
+                            key={id}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-emerald-300 border border-slate-800"
+                          >
+                            {cat.emoji} {cat.shortLabel}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-500">
+                        {new Date(pin.timestamp).toLocaleDateString()}
+                      </span>
+                      {currentUser?.role === 'superuser' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPin(pin);
+                            setIsPinModalOpen(true);
+                          }}
+                          className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold inline-flex items-center gap-1"
+                        >
+                          <Pencil className="w-2.5 h-2.5" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

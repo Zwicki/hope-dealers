@@ -29,6 +29,7 @@ interface SuperUserPanelProps {
   dbState: AppDatabaseState;
   onSaveHistoricalWalk: (walk: WalkSession, newPins: EncounterPin[]) => void;
   onSaveStandalonePin: (pin: EncounterPin) => void;
+  onViewMap?: () => void;
   onUpdateCloudConfig: (config: CloudConfig) => void;
   onAddUser: (user: UserAccount) => void;
   onRemoveUser: (userId: string) => void;
@@ -66,11 +67,11 @@ export const SuperUserPanel: React.FC<SuperUserPanelProps> = ({
   dbState,
   onSaveHistoricalWalk,
   onSaveStandalonePin,
+  onViewMap,
   onUpdateCloudConfig,
   onAddUser,
   onRemoveUser,
   onClearAllWalkData,
-  onRestoreDemoData,
   onImportDatabase,
   onTriggerSync,
 }) => {
@@ -207,6 +208,7 @@ export const SuperUserPanel: React.FC<SuperUserPanelProps> = ({
         lbsPerTrashBag={cloudConfig.lbsPerTrashBag}
         onSaveHistoricalWalk={onSaveHistoricalWalk}
         onSaveStandalonePin={onSaveStandalonePin}
+        onViewMap={onViewMap}
       />
 
       {/* 1. Team Access Code & Outreach Defaults */}

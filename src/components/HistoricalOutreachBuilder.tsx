@@ -54,6 +54,29 @@ interface HistoricalOutreachBuilderProps {
   onViewMap?: () => void;
 }
 
+const STREET_COORDS_LOOKUP: Record<string, [number, number]> = {
+  'Paint St': [39.3331, -82.9824],
+  'E Main St': [39.3333, -82.9765],
+  'W Main St': [39.3330, -82.9885],
+  'N Bridge St': [39.3365, -82.9717],
+  'S Bridge St': [39.3295, -82.9719],
+  'E Water St': [39.3361, -82.9795],
+  'W Water St': [39.3359, -82.9875],
+  'Eastern Ave': [39.3278, -82.9675],
+  'Western Ave': [39.3338, -82.9960],
+  'N High St': [39.3372, -82.9895],
+  'S High St': [39.3292, -82.9892],
+  'Mulberry St': [39.3350, -82.9786],
+  'E 2nd St': [39.3348, -82.9772],
+  'W 2nd St': [39.3346, -82.9862],
+  'E 4th St': [39.3316, -82.9755],
+  'E 7th St': [39.3268, -82.9652],
+  'Yoctangee Pkwy': [39.3385, -82.9815],
+  'Scioto Ave': [39.3320, -82.9920],
+  'Watt St': [39.3285, -82.9750],
+  'Ewing St': [39.3315, -82.9788],
+};
+
 const startFinishIcon = (isClosedLoop: boolean) =>
   L.divIcon({
     className: 'hist-start-finish-icon',
@@ -279,11 +302,22 @@ export const HistoricalOutreachBuilder: React.FC<
   };
 
   const handleToggleStreet = (street: string) => {
-    setStreetsWalked((prev) =>
-      prev.includes(street)
+    setStreetsWalked((prev) => {
+      const exists = prev.includes(street);
+      const next = exists
         ? prev.filter((s) => s !== street)
-        : [...prev, street]
-    );
+        : [...prev, street];
+
+      if (!exists && STREET_COORDS_LOOKUP[street]) {
+        const coord = STREET_COORDS_LOOKUP[street];
+        setRoutePoints((rPrev) => {
+          const nextRoute: [number, number][] = [...rPrev, coord];
+          recomputeRouteMiles(nextRoute);
+          return nextRoute;
+        });
+      }
+      return next;
+    });
   };
 
   const handleAddCustomStreet = (e: React.FormEvent) => {
@@ -346,7 +380,11 @@ export const HistoricalOutreachBuilder: React.FC<
       routePoints.length >= 2
         ? routePoints
         : routePoints.length === 1
-        ? [routePoints[0], routePoints[0]]
+        ? [
+            routePoints[0],
+            [routePoints[0][0] + 0.0018, routePoints[0][1] + 0.0015],
+            routePoints[0],
+          ]
         : [
             CHILLICOTHE_CENTER,
             [CHILLICOTHE_CENTER[0] + 0.002, CHILLICOTHE_CENTER[1] + 0.0015],
@@ -360,7 +398,28 @@ export const HistoricalOutreachBuilder: React.FC<
         ? Number(milesWalked.toFixed(2))
         : Number(Math.max(0.5, (durationMinutes / 60) * 1.2).toFixed(2));
 
-    const builtPins: EncounterPin[] = draftPins.map((dp, idx) => ({
+    // Automatically include any typed person in the Prayer Pin inputs even if the user didn't click "Add Person to This Walk" first
+    const allDraftPins: DraftPrayerPin[] = [...draftPins];
+    if (pinFirstName.trim() || pinDescription.trim() || pinNeeds.length > 0) {
+      const cleanName = pinFirstName.trim() || 'Community Friend';
+      const cleanDesc =
+        pinDescription.trim() ||
+        `Prayed with ${cleanName} on ${
+          pinStreet || streetsWalked[0] || 'the street'
+        }.`;
+      allDraftPins.push({
+        id: `draft-pin-auto-${Date.now()}`,
+        firstName: cleanName,
+        type: pinType,
+        needCategories: pinNeeds,
+        description: cleanDesc,
+        streetName: pinStreet.trim() || streetsWalked[0] || 'Paint St',
+        lat: finalRoute[Math.floor(finalRoute.length / 2)]?.[0] ?? pinCoords[0],
+        lng: finalRoute[Math.floor(finalRoute.length / 2)]?.[1] ?? pinCoords[1],
+      });
+    }
+
+    const builtPins: EncounterPin[] = allDraftPins.map((dp, idx) => ({
       id: `pin-hist-${Date.now()}-${idx}`,
       walkId,
       timestamp: new Date(
@@ -445,6 +504,9 @@ export const HistoricalOutreachBuilder: React.FC<
     setMilesWalked(0);
     setStreetsWalked([]);
     setDraftPins([]);
+    setPinFirstName('');
+    setPinDescription('');
+    setPinNeeds([]);
     setInteractionSpots([]);
     setInteractionsCount(0);
     setPrayersCount(0);
