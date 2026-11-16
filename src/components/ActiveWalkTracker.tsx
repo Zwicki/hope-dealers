@@ -1126,8 +1126,10 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
                 positions={gpsPath}
                 pathOptions={{
                   color: '#f97316',
-                  weight: 5,
-                  opacity: 0.9,
+                  weight: 4,
+                  opacity: 0.92,
+                  dashArray: '8, 6',
+                  lineCap: 'round',
                 }}
               />
             )}

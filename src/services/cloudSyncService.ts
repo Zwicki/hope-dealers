@@ -106,6 +106,7 @@ export function loadDatabase(): AppDatabaseState {
     parsed.pins = (parsed.pins || []).filter(
       (p) => !p.id.startsWith('pin-seed-')
     );
+    const beforePinsJson = JSON.stringify(parsed.pins);
     parsed.pins = unstackAndResolvePins(parsed.walks, parsed.pins);
     parsed.users = ensureSuperUser(parsed.users || []);
     parsed.deletedWalkIds = parsed.deletedWalkIds || [];
@@ -120,6 +121,9 @@ export function loadDatabase(): AppDatabaseState {
     ) {
       // Clear legacy placeholder webhook URL
       parsed.cloudConfig.customWebhookUrl = '';
+    }
+    if (JSON.stringify(parsed.pins) !== beforePinsJson) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     }
     return parsed;
   } catch {
@@ -850,12 +854,25 @@ export function matchStreetToRouteSegment(
   }
 
   // 2. Match East-West street by North-to-South rank within the route's E-W segments
+  // Note: Chillicothe's street grid is tilted ~11.5° NNE as you go East, so "Grid North" perpendicular to E-W streets is (lat - 0.16 * lng)
+  const gridNorthOf = (s: RouteSegmentInfo) => s.mid[0] - 0.16 * s.mid[1];
+
   const ewRank = EW_STREET_NS_RANK[core];
   if (ewRank !== undefined) {
     const ewSegments = segments.filter((s) => s.isEastWest);
-    const pool = ewSegments.length > 0 ? ewSegments : segments;
-    // Sort pool from North (highest lat) to South (lowest lat)
-    const sortedNorthToSouth = [...pool].sort((a, b) => b.mid[0] - a.mid[0]);
+    // Prefer substantial street segments (>= 0.03 miles) over tiny corner stubs
+    const mainEwSegments = ewSegments.filter((s) => s.lengthMiles >= 0.03);
+    const pool =
+      mainEwSegments.length > 0
+        ? mainEwSegments
+        : ewSegments.length > 0
+        ? ewSegments
+        : segments;
+
+    // Sort pool from Grid-North (highest gridNorth) to Grid-South (lowest gridNorth)
+    const sortedNorthToSouth = [...pool].sort(
+      (a, b) => gridNorthOf(b) - gridNorthOf(a)
+    );
 
     // Find all unique E-W streets involved in this walk
     const walkEwRanks = Array.from(
@@ -869,10 +886,10 @@ export function matchStreetToRouteSegment(
     const rankIdx = walkEwRanks.indexOf(ewRank);
     if (walkEwRanks.length > 1 && sortedNorthToSouth.length > 1) {
       if (rankIdx === 0) {
-        return sortedNorthToSouth[0]; // Northernmost E-W segment
+        return sortedNorthToSouth[0]; // Northernmost E-W segment on this route
       }
       if (rankIdx === walkEwRanks.length - 1) {
-        return sortedNorthToSouth[sortedNorthToSouth.length - 1]; // Southernmost E-W segment
+        return sortedNorthToSouth[sortedNorthToSouth.length - 1]; // Southernmost E-W segment on this route
       }
       const mappedIdx = Math.min(
         sortedNorthToSouth.length - 1,
@@ -889,7 +906,13 @@ export function matchStreetToRouteSegment(
   const nsRank = NS_STREET_WE_RANK[core];
   if (nsRank !== undefined) {
     const nsSegments = segments.filter((s) => s.isNorthSouth);
-    const pool = nsSegments.length > 0 ? nsSegments : segments;
+    const mainNsSegments = nsSegments.filter((s) => s.lengthMiles >= 0.025);
+    const pool =
+      mainNsSegments.length > 0
+        ? mainNsSegments
+        : nsSegments.length > 0
+        ? nsSegments
+        : segments;
 
     // Find all unique N-S streets involved in this walk
     const walkNsRanks = Array.from(
@@ -911,8 +934,6 @@ export function matchStreetToRouteSegment(
       }
     }
 
-    // If only 1 N-S street was specified on a closed loop (e.g. McArthur St on the east end of an E 2nd -> McArthur -> Main loop),
-    // prefer the non-closing N-S segment (or the easternmost N-S segment for eastern streets like McArthur)
     if (nsRank >= 10 && sortedWestToEast.length > 1) {
       return sortedWestToEast[sortedWestToEast.length - 1];
     }
@@ -1123,28 +1144,58 @@ export function unstackAndResolvePins(
   const walksById = new Map<string, WalkSession>();
   (walks || []).forEach((w) => walksById.set(w.id, w));
 
-  // Helper to find the walk a pin belongs to (by walkId, or by matching date + street if standalone)
+  // Helper to find the walk a pin belongs to (by walkId, date, street, or closest route)
+  const walksWithRoutes = (walks || []).filter(
+    (w) => w.gpsPath && w.gpsPath.length >= 2
+  );
+
   const findWalkForPin = (pin: EncounterPin): WalkSession | undefined => {
     const direct = walksById.get(pin.walkId);
     if (direct && direct.gpsPath && direct.gpsPath.length >= 2) return direct;
 
     const pinDate = (pin.timestamp || '').slice(0, 10);
     const pinCore = getCoreStreetName(pin.streetName);
-    // Match walk on same date
-    const sameDateWalk = (walks || []).find(
-      (w) => w.date === pinDate && w.gpsPath && w.gpsPath.length >= 2
-    );
+
+    // 1. Match walk on same date
+    const sameDateWalk = walksWithRoutes.find((w) => w.date === pinDate);
     if (sameDateWalk) return sameDateWalk;
 
-    // Or match walk that walked this street
+    // 2. Match walk that explicitly lists this street in streetsWalked or cached segment streets
     if (pinCore) {
-      return (walks || []).find(
-        (w) =>
-          w.gpsPath &&
-          w.gpsPath.length >= 2 &&
-          w.streetsWalked.some((s) => getCoreStreetName(s) === pinCore)
-      );
+      const streetMatchWalk = walksWithRoutes.find((w) => {
+        if (w.streetsWalked.some((s) => getCoreStreetName(s) === pinCore)) {
+          return true;
+        }
+        const segs = buildRouteSegments(w.gpsPath);
+        return segs.some((s) => s.cachedCoreKey === pinCore);
+      });
+      if (streetMatchWalk) return streetMatchWalk;
+
+      // If pin is on 2nd, Main, or McArthur, prefer the northern route loop if one exists
+      if (['2nd', 'second', 'main', 'mcarthur', 'macarthur'].includes(pinCore)) {
+        const sortedByNorth = [...walksWithRoutes].sort(
+          (a, b) => b.gpsPath[0][0] - a.gpsPath[0][0]
+        );
+        if (sortedByNorth.length > 0) return sortedByNorth[0];
+      }
     }
+
+    // 3. Fallback: closest walk route in walksWithRoutes
+    if (walksWithRoutes.length > 0) {
+      let bestWalk = walksWithRoutes[0];
+      let bestDist = Infinity;
+      for (const w of walksWithRoutes) {
+        for (const pt of w.gpsPath) {
+          const d = calculateDistanceMiles(pin.lat, pin.lng, pt[0], pt[1]);
+          if (d < bestDist) {
+            bestDist = d;
+            bestWalk = w;
+          }
+        }
+      }
+      return bestWalk;
+    }
+
     return undefined;
   };
 
@@ -1197,13 +1248,19 @@ export function unstackAndResolvePins(
     }
   }
 
+  const nowIso = new Date().toISOString();
   return pins.map((pin) => {
     const newCoord = updatedPinCoords.get(pin.id);
-    if (newCoord) {
+    if (
+      newCoord &&
+      (Math.abs(pin.lat - newCoord[0]) > 0.00001 ||
+        Math.abs(pin.lng - newCoord[1]) > 0.00001)
+    ) {
       return {
         ...pin,
         lat: newCoord[0],
         lng: newCoord[1],
+        updatedAt: nowIso,
       };
     }
     return pin;

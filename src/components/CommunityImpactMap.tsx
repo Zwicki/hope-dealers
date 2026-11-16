@@ -53,6 +53,17 @@ interface CommunityImpactMapProps {
   onOpenLogin: () => void;
 }
 
+const ROUTE_COLORS = [
+  '#ef4444', // Red
+  '#3b82f6', // Blue
+  '#f97316', // Orange
+  '#10b981', // Emerald Green
+  '#a855f7', // Purple
+  '#06b6d4', // Cyan
+  '#ec4899', // Pink
+  '#eab308', // Amber Gold
+];
+
 function createPinIcon(
   type: 'prayer' | 'service' | 'both',
   peopleCount = 1
@@ -652,24 +663,34 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             onLocationPicked={handleMapLocationPicked}
           />
 
-          {/* Polylines for Walked GPS Routes */}
+          {/* Polylines for Walked GPS Routes (Alternating Colors & Smaller Dashed Lines) */}
           {showRoutes &&
-            walks.map((walk) =>
-              walk.gpsPath && walk.gpsPath.length >= 2 ? (
+            walks.map((walk, walkIdx) => {
+              const routeColor = ROUTE_COLORS[walkIdx % ROUTE_COLORS.length];
+              return walk.gpsPath && walk.gpsPath.length >= 2 ? (
                 <Polyline
                   key={walk.id}
                   positions={walk.gpsPath}
                   pathOptions={{
-                    color: '#f97316',
-                    weight: 6,
-                    opacity: 0.88,
+                    color: routeColor,
+                    weight: 4,
+                    opacity: 0.92,
+                    dashArray: '8, 6',
                     lineCap: 'round',
+                    lineJoin: 'round',
                   }}
                 >
                   <Popup>
                     <div className="space-y-1.5 min-w-[210px]">
-                      <div className="text-xs font-extrabold text-phoenix-400 uppercase">
-                        🚶 Hope Dealers Street Route
+                      <div
+                        className="text-xs font-extrabold uppercase flex items-center gap-1.5"
+                        style={{ color: routeColor }}
+                      >
+                        <span
+                          className="w-3 h-3 rounded-full inline-block border border-white"
+                          style={{ backgroundColor: routeColor }}
+                        />
+                        <span>🚶 Hope Dealers Street Route</span>
                       </div>
                       <div className="text-xs font-bold text-white">
                         {walk.streetsWalked.join(' • ')}
@@ -736,8 +757,8 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                     </div>
                   </Popup>
                 </Polyline>
-              ) : null
-            )}
+              ) : null;
+            })}
 
           {/* Starting Point Markers (🏁) for Each Walk (Waypoint numbers hidden on saved routes; visible only when adding/editing) */}
           {showStartPoints &&
@@ -950,14 +971,23 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
               </p>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {walks.map((w) => (
+                {walks.map((w, walkIdx) => {
+                  const routeColor =
+                    ROUTE_COLORS[walkIdx % ROUTE_COLORS.length];
+                  return (
                   <div
                     key={w.id}
                     className="p-3 rounded-xl bg-slateDark-950 border border-slate-800 space-y-1.5"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-extrabold text-phoenix-300">
-                        📅 {w.date} • {w.milesWalked} mi
+                      <span className="text-xs font-extrabold text-white inline-flex items-center gap-1.5">
+                        <span
+                          className="w-3 h-3 rounded-full inline-block border border-white/80 shrink-0"
+                          style={{ backgroundColor: routeColor }}
+                        />
+                        <span>
+                          📅 {w.date} • {w.milesWalked} mi
+                        </span>
                       </span>
                       <div className="flex items-center gap-1.5">
                         {w.gpsPath && w.gpsPath.length > 0 && (
@@ -1005,7 +1035,8 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                       <span>🗑️ {w.trashBagsCount} Bags</span>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

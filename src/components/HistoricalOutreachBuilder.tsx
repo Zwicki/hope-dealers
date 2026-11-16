@@ -1026,8 +1026,10 @@ export const HistoricalOutreachBuilder: React.FC<
                     positions={routePoints}
                     pathOptions={{
                       color: isLoopClosed ? '#10b981' : '#f97316',
-                      weight: 5,
-                      opacity: 0.9,
+                      weight: 4,
+                      opacity: 0.92,
+                      dashArray: '8, 6',
+                      lineCap: 'round',
                     }}
                   />
                 )}

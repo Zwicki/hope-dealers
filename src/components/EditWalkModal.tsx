@@ -677,7 +677,13 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 {routePoints.length >= 2 && (
                   <Polyline
                     positions={routePoints}
-                    pathOptions={{ color: '#f97316', weight: 5, opacity: 0.9 }}
+                    pathOptions={{
+                      color: '#f97316',
+                      weight: 4,
+                      opacity: 0.92,
+                      dashArray: '8, 6',
+                      lineCap: 'round',
+                    }}
                   />
                 )}
               </MapContainer>
