@@ -739,7 +739,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
               ) : null
             )}
 
-          {/* Starting Point Markers (🏁) and Route Waypoints for Each Walk */}
+          {/* Starting Point Markers (🏁) for Each Walk (Waypoint numbers hidden on saved routes; visible only when adding/editing) */}
           {showStartPoints &&
             walks.map((walk) => {
               const sp =
@@ -753,7 +753,6 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                     }
                   : null);
 
-              const waypoints = (walk.gpsPath || []).slice(1);
               const isSuper = currentUser?.role === 'superuser';
 
               return (
@@ -762,15 +761,6 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                     <Marker
                       position={[sp.lat, sp.lng]}
                       icon={startFlagIcon}
-                      draggable={Boolean(isSuper && onSaveWalk)}
-                      eventHandlers={{
-                        dragend: (e) => {
-                          if (isSuper && onSaveWalk) {
-                            const pos = e.target.getLatLng();
-                            handleMoveWaypointInWalk(walk, 0, pos.lat, pos.lng);
-                          }
-                        },
-                      }}
                     >
                       <Popup>
                         <div className="space-y-1.5 min-w-[200px]">
@@ -787,120 +777,20 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                             👥 {walk.groupMembers.join(', ')}
                           </div>
                           {isSuper && onSaveWalk && (
-                            <div className="pt-1.5 border-t border-slate-700 space-y-1">
-                              <div className="text-[10px] text-slate-400">
-                                💡 Drag marker on map to move start point
-                              </div>
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleDeleteWaypointFromWalk(walk, 0)
-                                  }
-                                  className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[10px] font-bold"
-                                >
-                                  🗑️ Delete Start Point
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingWalk(walk)}
-                                  className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold"
-                                >
-                                  ✏️ Edit Route
-                                </button>
-                              </div>
+                            <div className="pt-1.5 border-t border-slate-700 flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setEditingWalk(walk)}
+                                className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold"
+                              >
+                                ✏️ Edit Route & Waypoints
+                              </button>
                             </div>
                           )}
                         </div>
                       </Popup>
                     </Marker>
                   )}
-
-                  {waypoints.map((pt, idx) => {
-                    const actualPathIndex = idx + 1;
-                    // Don't overlap start flag if last waypoint returned to exact start point
-                    if (
-                      sp &&
-                      idx === waypoints.length - 1 &&
-                      Math.abs(pt[0] - sp.lat) < 0.0001 &&
-                      Math.abs(pt[1] - sp.lng) < 0.0001
-                    ) {
-                      return null;
-                    }
-                    return (
-                      <Marker
-                        key={`wp-${walk.id}-${actualPathIndex}-${pt[0]}-${pt[1]}`}
-                        position={pt}
-                        icon={createRouteWaypointIcon(actualPathIndex)}
-                        draggable={Boolean(isSuper && onSaveWalk)}
-                        eventHandlers={{
-                          dragend: (e) => {
-                            if (isSuper && onSaveWalk) {
-                              const pos = e.target.getLatLng();
-                              handleMoveWaypointInWalk(
-                                walk,
-                                actualPathIndex,
-                                pos.lat,
-                                pos.lng
-                              );
-                            }
-                          },
-                        }}
-                      >
-                        <Popup>
-                          <div className="text-xs space-y-1.5 min-w-[200px]">
-                            <strong className="text-phoenix-400 block">
-                              📍 Route Waypoint #{actualPathIndex}
-                            </strong>
-                            <div>
-                              📅 {walk.date} • ({pt[0].toFixed(4)},{' '}
-                              {pt[1].toFixed(4)})
-                            </div>
-                            <div className="text-[11px] text-slate-300">
-                              Streets: {walk.streetsWalked.join(', ')}
-                            </div>
-                            {isSuper && onSaveWalk && (
-                              <div className="pt-1.5 border-t border-slate-700 space-y-1">
-                                <div className="text-[10px] text-slate-400">
-                                  💡 Drag this waypoint on the map to move it
-                                </div>
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleDeleteWaypointFromWalk(
-                                        walk,
-                                        actualPathIndex
-                                      )
-                                    }
-                                    className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[10px] font-bold"
-                                  >
-                                    🗑️ Delete Waypoint #{actualPathIndex}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingWalk(walk)}
-                                    className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold"
-                                  >
-                                    ✏️ Edit Route
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleClearRouteFromWalk(walk)
-                                    }
-                                    className="px-2 py-1 rounded bg-slate-800 hover:bg-rose-500/30 text-slate-300 hover:text-rose-200 text-[10px] font-bold"
-                                  >
-                                    🗑️ Clear Route
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </Popup>
-                      </Marker>
-                    );
-                  })}
                 </React.Fragment>
               );
             })}
