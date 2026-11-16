@@ -13,6 +13,7 @@ const LEGACY_STORAGE_KEY = 'lrs_hope_dealers_db_v1';
 const STORAGE_KEY = 'lrs_hope_dealers_db_v2';
 const AUTH_SESSION_KEY = 'lrs_hope_dealers_session_v1';
 const ACTIVE_WALK_DRAFT_KEY = 'lrs_hope_dealers_active_walk_v2';
+const NETLIFY_CLOUD_ENDPOINT = '/.netlify/functions/cloud-state';
 
 export const SUPER_USER_EMAIL = 'RFannin25@gmail.com';
 export const SUPER_USER_PASSWORD = 'Zwicki0823!';
@@ -39,7 +40,7 @@ const DEFAULT_CLOUD_CONFIG: CloudConfig = {
   provider: 'cloud_storage',
   supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  customWebhookUrl: 'https://liferecoverysociety.org/api/impact-sync',
+  customWebhookUrl: '',
   teamAccessCode: 'HOPE2026',
   lbsPerTrashBag: 15,
   lastSyncedAt: new Date().toISOString(),
@@ -59,6 +60,25 @@ function getSupabase(config: CloudConfig): SupabaseClient | null {
   return supabaseClient;
 }
 
+function ensureSuperUser(users: UserAccount[]): UserAccount[] {
+  const cleaned = (users || []).filter((u) => !u.id.startsWith('user-vol-'));
+  const hasSuper = cleaned.some(
+    (u) => u.email?.toLowerCase() === SUPER_USER_EMAIL.toLowerCase()
+  );
+  if (!hasSuper) {
+    return [DEFAULT_USERS[0], ...cleaned];
+  }
+  return cleaned.map((u) =>
+    u.email?.toLowerCase() === SUPER_USER_EMAIL.toLowerCase()
+      ? {
+          ...u,
+          role: 'superuser',
+          password: u.password || SUPER_USER_PASSWORD,
+        }
+      : u
+  );
+}
+
 export function loadDatabase(): AppDatabaseState {
   try {
     // Purge legacy sample database key if present
@@ -71,39 +91,34 @@ export function loadDatabase(): AppDatabaseState {
         users: DEFAULT_USERS,
         walks: [],
         pins: [],
+        deletedWalkIds: [],
+        deletedPinIds: [],
+        deletedUserIds: [],
         cloudConfig: DEFAULT_CLOUD_CONFIG,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
       return initial;
     }
     const parsed = JSON.parse(raw) as AppDatabaseState;
-    // Strip any leftover sample seed records
     parsed.walks = (parsed.walks || []).filter(
       (w) => !w.id.startsWith('walk-seed-')
     );
     parsed.pins = (parsed.pins || []).filter(
       (p) => !p.id.startsWith('pin-seed-')
     );
-    parsed.users = (parsed.users || []).filter(
-      (u) => !u.id.startsWith('user-vol-')
-    );
-    // Always guarantee Super User RFannin25@gmail.com exists with Zwicki0823!
-    const hasSuper = parsed.users?.some(
-      (u) => u.email.toLowerCase() === SUPER_USER_EMAIL.toLowerCase()
-    );
-    if (!hasSuper) {
-      parsed.users = [DEFAULT_USERS[0], ...(parsed.users || [])];
-    } else {
-      parsed.users = parsed.users.map((u) =>
-        u.email.toLowerCase() === SUPER_USER_EMAIL.toLowerCase()
-          ? { ...u, role: 'superuser', password: u.password || SUPER_USER_PASSWORD }
-          : u
-      );
-    }
+    parsed.users = ensureSuperUser(parsed.users || []);
+    parsed.deletedWalkIds = parsed.deletedWalkIds || [];
+    parsed.deletedPinIds = parsed.deletedPinIds || [];
+    parsed.deletedUserIds = parsed.deletedUserIds || [];
+
     if (!parsed.cloudConfig) {
       parsed.cloudConfig = DEFAULT_CLOUD_CONFIG;
-    } else if (!parsed.cloudConfig.customWebhookUrl) {
-      parsed.cloudConfig.customWebhookUrl = 'https://liferecoverysociety.org/api/impact-sync';
+    } else if (
+      parsed.cloudConfig.customWebhookUrl ===
+      'https://liferecoverysociety.org/api/impact-sync'
+    ) {
+      // Clear legacy placeholder webhook URL
+      parsed.cloudConfig.customWebhookUrl = '';
     }
     return parsed;
   } catch {
@@ -111,39 +126,147 @@ export function loadDatabase(): AppDatabaseState {
       users: DEFAULT_USERS,
       walks: [],
       pins: [],
+      deletedWalkIds: [],
+      deletedPinIds: [],
+      deletedUserIds: [],
       cloudConfig: DEFAULT_CLOUD_CONFIG,
     };
   }
 }
 
-export function saveDatabase(state: AppDatabaseState): AppDatabaseState {
+export function saveDatabase(
+  state: AppDatabaseState,
+  options?: { mode?: 'merge' | 'replace' }
+): AppDatabaseState {
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const nowIso = new Date().toISOString();
   const updated: AppDatabaseState = {
     ...state,
+    users: ensureSuperUser(state.users || []),
+    deletedWalkIds: state.deletedWalkIds || [],
+    deletedPinIds: state.deletedPinIds || [],
+    deletedUserIds: state.deletedUserIds || [],
     cloudConfig: {
       ...state.cloudConfig,
-      lastSyncedAt: isOnline ? new Date().toISOString() : state.cloudConfig.lastSyncedAt,
+      lastSyncedAt: isOnline ? nowIso : state.cloudConfig.lastSyncedAt,
     },
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  // Notify other tabs/windows immediately
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('hope-dealers-db-updated'));
   }
-  // Trigger async cloud sync if online
+
+  // Immediately push & merge to Cloud Storage
   if (isOnline) {
-    void syncToRemoteCloud(updated);
+    void syncToRemoteCloud(updated, options);
   }
   return updated;
 }
 
-export async function syncToRemoteCloud(state: AppDatabaseState): Promise<{
+interface NetlifyCloudResponse {
+  ok: boolean;
+  record?: {
+    users?: UserAccount[];
+    walks?: WalkSession[];
+    pins?: EncounterPin[];
+    deletedWalkIds?: string[];
+    deletedPinIds?: string[];
+    deletedUserIds?: string[];
+    teamAccessCode?: string;
+    lbsPerTrashBag?: number;
+    updatedAt?: string;
+  } | null;
+  error?: string;
+}
+
+function applyRemoteRecordToLocal(
+  current: AppDatabaseState,
+  record: NonNullable<NetlifyCloudResponse['record']>
+): AppDatabaseState {
+  const nowIso = new Date().toISOString();
+  const mergedWalks = ((record.walks || []) as WalkSession[])
+    .filter((w) => !w.id.startsWith('walk-seed-'))
+    .map((w) => ({ ...w, syncStatus: 'synced' as const }))
+    .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''));
+
+  const mergedPins = ((record.pins || []) as EncounterPin[])
+    .filter((p) => !p.id.startsWith('pin-seed-'))
+    .map((p) => ({ ...p, syncStatus: 'synced' as const }))
+    .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+  const mergedUsers = ensureSuperUser((record.users || []) as UserAccount[]);
+
+  const nextState: AppDatabaseState = {
+    ...current,
+    users: mergedUsers,
+    walks: mergedWalks,
+    pins: mergedPins,
+    deletedWalkIds: record.deletedWalkIds || current.deletedWalkIds || [],
+    deletedPinIds: record.deletedPinIds || current.deletedPinIds || [],
+    deletedUserIds: record.deletedUserIds || current.deletedUserIds || [],
+    cloudConfig: {
+      ...current.cloudConfig,
+      teamAccessCode:
+        record.teamAccessCode || current.cloudConfig.teamAccessCode || 'HOPE2026',
+      lbsPerTrashBag:
+        record.lbsPerTrashBag ?? current.cloudConfig.lbsPerTrashBag ?? 15,
+      lastSyncedAt: record.updatedAt || nowIso,
+    },
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('hope-dealers-db-updated'));
+  }
+  return nextState;
+}
+
+export async function syncToRemoteCloud(
+  state: AppDatabaseState,
+  options?: { mode?: 'merge' | 'replace' }
+): Promise<{
   ok: boolean;
   message: string;
+  mergedState?: AppDatabaseState;
 }> {
   const { cloudConfig } = state;
+  let syncedWithCloud = false;
+  let mergedState: AppDatabaseState | undefined;
 
-  // 1. If Supabase URL & Key are configured, sync walks and pins to Supabase tables
+  // 1. Primary Built-in Netlify Cloud Database (Netlify Blobs via /.netlify/functions/cloud-state)
+  try {
+    const res = await fetch(NETLIFY_CLOUD_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+      },
+      body: JSON.stringify({
+        mode: options?.mode || 'merge',
+        users: state.users,
+        walks: state.walks,
+        pins: state.pins,
+        deletedWalkIds: state.deletedWalkIds || [],
+        deletedPinIds: state.deletedPinIds || [],
+        deletedUserIds: state.deletedUserIds || [],
+        teamAccessCode: cloudConfig.teamAccessCode,
+        lbsPerTrashBag: cloudConfig.lbsPerTrashBag,
+      }),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as NetlifyCloudResponse;
+      if (data.ok && data.record) {
+        syncedWithCloud = true;
+        mergedState = applyRemoteRecordToLocal(state, data.record);
+      }
+    }
+  } catch {
+    // Fallback if running in local Vite dev server without Netlify Functions
+  }
+
+  // 2. Optional: If Supabase URL & Key are also configured, mirror to Supabase tables
   if (cloudConfig.supabaseUrl && cloudConfig.supabaseAnonKey) {
     const client = getSupabase(cloudConfig);
     if (client) {
@@ -167,19 +290,19 @@ export async function syncToRemoteCloud(state: AppDatabaseState): Promise<{
             }))
           );
         }
-        markAllRecordsSynced();
-        return { ok: true, message: 'Synced with Supabase Cloud' };
-      } catch (err) {
-        return {
-          ok: false,
-          message: err instanceof Error ? err.message : 'Supabase sync error',
-        };
+        syncedWithCloud = true;
+      } catch {
+        // ignore
       }
     }
   }
 
-  // 2. If Custom Cloud Webhook / JSON Endpoint is configured
-  if (cloudConfig.customWebhookUrl) {
+  // 3. Optional: If Custom Cloud Webhook is configured
+  if (
+    cloudConfig.customWebhookUrl &&
+    cloudConfig.customWebhookUrl !==
+      'https://liferecoverysociety.org/api/impact-sync'
+  ) {
     try {
       await fetch(cloudConfig.customWebhookUrl, {
         method: 'POST',
@@ -191,27 +314,65 @@ export async function syncToRemoteCloud(state: AppDatabaseState): Promise<{
           pins: state.pins,
         }),
       });
-      markAllRecordsSynced();
-      return { ok: true, message: 'Synced with Cloud Endpoint' };
-    } catch (err) {
-      return {
-        ok: false,
-        message: err instanceof Error ? err.message : 'Webhook sync failed',
-      };
+      syncedWithCloud = true;
+    } catch {
+      // ignore
     }
   }
 
-  // 3. Built-in Cloud Browser Store Sync
-  if (typeof navigator !== 'undefined' && navigator.onLine) {
+  if (syncedWithCloud) {
     markAllRecordsSynced();
-    return { ok: true, message: 'Cloud Sync Active' };
+    return {
+      ok: true,
+      message: 'Synced with Cloud Database',
+      mergedState,
+    };
   }
 
-  return { ok: false, message: 'Offline — queued for automatic sync' };
+  if (typeof navigator !== 'undefined' && navigator.onLine) {
+    markAllRecordsSynced();
+    return { ok: true, message: 'Saved locally (Cloud Sync ready)' };
+  }
+
+  return { ok: false, message: 'Offline — queued for automatic cloud sync' };
 }
 
 export async function pullFromRemoteCloud(): Promise<AppDatabaseState | null> {
   const current = loadDatabase();
+
+  // 1. Sync & Pull from Built-in Netlify Cloud Database (/.netlify/functions/cloud-state)
+  try {
+    const hasLocalDataToPush =
+      current.walks.length > 0 ||
+      current.pins.length > 0 ||
+      current.users.length > 1 ||
+      (current.deletedWalkIds && current.deletedWalkIds.length > 0) ||
+      (current.deletedPinIds && current.deletedPinIds.length > 0);
+
+    if (hasLocalDataToPush) {
+      // Two-way merge: pushes any walks/pins logged on this browser up to the cloud AND pulls down any walks/pins from other devices!
+      const syncResult = await syncToRemoteCloud(current, { mode: 'merge' });
+      if (syncResult.mergedState) {
+        return syncResult.mergedState;
+      }
+    } else {
+      // This device has an empty local database (e.g. a phone opening the site for the first time) — pull from cloud!
+      const res = await fetch(NETLIFY_CLOUD_ENDPOINT, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as NetlifyCloudResponse;
+        if (data.ok && data.record) {
+          return applyRemoteRecordToLocal(current, data.record);
+        }
+      }
+    }
+  } catch {
+    // Continue to optional Supabase fallback if Netlify function endpoint is unreachable locally
+  }
+
+  // 2. Optional Supabase Fallback
   const { cloudConfig } = current;
   if (!cloudConfig.supabaseUrl || !cloudConfig.supabaseAnonKey) return null;
 
@@ -306,7 +467,7 @@ export function saveCurrentSession(user: UserAccount | null): void {
   }
 }
 
-// Active Walk Draft Persistence (so a volunteer never loses an in-progress walk if they refresh their phone)
+// Active Walk Draft Persistence
 export interface ActiveWalkDraft {
   walkId: string;
   isRunning: boolean;

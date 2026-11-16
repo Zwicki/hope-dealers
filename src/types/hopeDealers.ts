@@ -97,6 +97,7 @@ export interface EncounterPin {
   loggedByRecorder: string;
   groupMembers: string[];
   syncStatus: 'synced' | 'pending';
+  updatedAt?: string;
 }
 
 export interface GpsWaypoint {
@@ -141,6 +142,7 @@ export interface WalkSession {
   trashWeightLbs: number;
   notes?: string;
   syncStatus: 'synced' | 'pending';
+  updatedAt?: string;
 }
 
 export interface CloudConfig {
@@ -158,6 +160,9 @@ export interface AppDatabaseState {
   users: UserAccount[];
   walks: WalkSession[];
   pins: EncounterPin[];
+  deletedWalkIds?: string[];
+  deletedPinIds?: string[];
+  deletedUserIds?: string[];
   cloudConfig: CloudConfig;
 }
 

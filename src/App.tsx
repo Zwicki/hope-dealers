@@ -37,7 +37,7 @@ export function App() {
   );
   const [hasActiveWalkRunning, setHasActiveWalkRunning] = useState(false);
 
-  // Pull from cloud on startup and listen for online/offline events
+  // Pull from cloud on startup, on window focus, and listen for online/offline/sync events
   useEffect(() => {
     void pullFromRemoteCloud().then((remoteState) => {
       if (remoteState) setDbState(remoteState);
@@ -46,8 +46,8 @@ export function App() {
     const handleOnline = () => {
       setIsOnline(true);
       const latest = loadDatabase();
-      void syncToRemoteCloud(latest).then(() => {
-        setDbState(loadDatabase());
+      void syncToRemoteCloud(latest).then((res) => {
+        setDbState(res.mergedState || loadDatabase());
       });
     };
 
@@ -59,16 +59,35 @@ export function App() {
       setDbState(loadDatabase());
     };
 
+    const handleWindowFocus = () => {
+      void pullFromRemoteCloud().then((remoteState) => {
+        if (remoteState) setDbState(remoteState);
+      });
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('storage', handleStorageSync);
+    window.addEventListener('hope-dealers-db-updated', handleStorageSync);
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('storage', handleStorageSync);
+      window.removeEventListener('hope-dealers-db-updated', handleStorageSync);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
+
+  // Refresh from cloud when switching tabs so Map and Walk Log always show latest cloud data
+  useEffect(() => {
+    if (isOnline) {
+      void pullFromRemoteCloud().then((remoteState) => {
+        if (remoteState) setDbState(remoteState);
+      });
+    }
+  }, [activeTab, isOnline]);
 
   const handleLoginSuccess = (user: UserAccount) => {
     setCurrentUser(user);
@@ -135,9 +154,11 @@ export function App() {
   };
 
   const handleSaveWalk = (walk: WalkSession) => {
+    const nowIso = new Date().toISOString();
+    const walkWithTs: WalkSession = { ...walk, updatedAt: nowIso };
     setDbState((prev) => {
       const updatedWalks = [
-        walk,
+        walkWithTs,
         ...prev.walks.filter((w) => w.id !== walk.id),
       ].sort((a, b) => b.startTime.localeCompare(a.startTime));
       const updatedUsers = mergeMembersIntoUsers(prev.users, [
@@ -148,16 +169,22 @@ export function App() {
         ...prev,
         users: updatedUsers,
         walks: updatedWalks,
+        deletedWalkIds: (prev.deletedWalkIds || []).filter(
+          (id) => id !== walk.id
+        ),
       });
       return updated;
     });
   };
 
   const handleSavePin = (pin: EncounterPin) => {
+    const nowIso = new Date().toISOString();
+    const pinWithTs: EncounterPin = { ...pin, updatedAt: nowIso };
     setDbState((prev) => {
       const updated = saveDatabase({
         ...prev,
-        pins: [pin, ...prev.pins.filter((p) => p.id !== pin.id)],
+        pins: [pinWithTs, ...prev.pins.filter((p) => p.id !== pin.id)],
+        deletedPinIds: (prev.deletedPinIds || []).filter((id) => id !== pin.id),
       });
       return updated;
     });
@@ -167,11 +194,18 @@ export function App() {
     walk: WalkSession,
     newPins: EncounterPin[]
   ) => {
+    const nowIso = new Date().toISOString();
+    const walkWithTs: WalkSession = { ...walk, updatedAt: nowIso };
+    const pinsWithTs: EncounterPin[] = newPins.map((p) => ({
+      ...p,
+      updatedAt: nowIso,
+    }));
     setDbState((prev) => {
-      const updatedWalks = [walk, ...prev.walks.filter((w) => w.id !== walk.id)].sort(
-        (a, b) => b.startTime.localeCompare(a.startTime)
-      );
-      const updatedPins = [...newPins, ...prev.pins].sort((a, b) =>
+      const updatedWalks = [
+        walkWithTs,
+        ...prev.walks.filter((w) => w.id !== walk.id),
+      ].sort((a, b) => b.startTime.localeCompare(a.startTime));
+      const updatedPins = [...pinsWithTs, ...prev.pins].sort((a, b) =>
         b.timestamp.localeCompare(a.timestamp)
       );
       const updatedUsers = mergeMembersIntoUsers(prev.users, [
@@ -183,15 +217,22 @@ export function App() {
         users: updatedUsers,
         walks: updatedWalks,
         pins: updatedPins,
+        deletedWalkIds: (prev.deletedWalkIds || []).filter(
+          (id) => id !== walk.id
+        ),
       });
     });
   };
 
   const handleDeleteWalk = (walkId: string) => {
     setDbState((prev) => {
+      const nextDeleted = Array.from(
+        new Set([...(prev.deletedWalkIds || []), walkId])
+      );
       const updated = saveDatabase({
         ...prev,
         walks: prev.walks.filter((w) => w.id !== walkId),
+        deletedWalkIds: nextDeleted,
       });
       return updated;
     });
@@ -199,9 +240,13 @@ export function App() {
 
   const handleDeletePin = (pinId: string) => {
     setDbState((prev) => {
+      const nextDeleted = Array.from(
+        new Set([...(prev.deletedPinIds || []), pinId])
+      );
       const updated = saveDatabase({
         ...prev,
         pins: prev.pins.filter((p) => p.id !== pinId),
+        deletedPinIds: nextDeleted,
       });
       return updated;
     });
@@ -221,6 +266,9 @@ export function App() {
       saveDatabase({
         ...prev,
         users: [...prev.users, user],
+        deletedUserIds: (prev.deletedUserIds || []).filter(
+          (id) => id !== user.id
+        ),
       })
     );
   };
@@ -230,17 +278,25 @@ export function App() {
       saveDatabase({
         ...prev,
         users: prev.users.filter((u) => u.id !== userId),
+        deletedUserIds: Array.from(
+          new Set([...(prev.deletedUserIds || []), userId])
+        ),
       })
     );
   };
 
   const handleClearAllWalkData = () => {
     setDbState((prev) =>
-      saveDatabase({
-        ...prev,
-        walks: [],
-        pins: [],
-      })
+      saveDatabase(
+        {
+          ...prev,
+          walks: [],
+          pins: [],
+          deletedWalkIds: [],
+          deletedPinIds: [],
+        },
+        { mode: 'replace' }
+      )
     );
   };
 
