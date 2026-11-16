@@ -30,7 +30,7 @@ function isoToDisplayDate(iso: string): string {
   return `${mm}/${dd}/${yyyy}`;
 }
 
-function parseFlexibleDateToIso(raw: string): string | null {
+export function parseFlexibleDateToIso(raw: string): string | null {
   const clean = raw.trim();
   if (!clean) return null;
 
@@ -54,6 +54,17 @@ function parseFlexibleDateToIso(raw: string): string | null {
     if (year < 100) {
       year += year >= 70 ? 1900 : 2000;
     }
+    if (isValidDateParts(year, month, day)) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // Match M/D or MM/DD without year (e.g., "11/5") -> default to current year
+  const shortUsMatch = /^(\d{1,2})[-/.](\d{1,2})$/.exec(clean);
+  if (shortUsMatch) {
+    const month = parseInt(shortUsMatch[1], 10);
+    const day = parseInt(shortUsMatch[2], 10);
+    const year = new Date().getFullYear();
     if (isValidDateParts(year, month, day)) {
       return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }

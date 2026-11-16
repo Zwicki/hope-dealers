@@ -282,7 +282,7 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="p-5 space-y-5">
           {/* Date, Duration, Miles & Volunteer Hours */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
             <DateInputWithCalendar
@@ -319,9 +319,8 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 <Route className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="number"
-                  step="0.05"
+                  step="any"
                   min="0"
-                  required
                   value={milesWalked}
                   onChange={(e) =>
                     setMilesWalked(Math.max(0, parseFloat(e.target.value) || 0))

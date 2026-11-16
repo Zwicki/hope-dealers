@@ -321,6 +321,7 @@ export function App() {
               onSaveHistoricalWalk={handleSaveHistoricalWalk}
               onSavePin={handleSavePin}
               onViewMap={() => setActiveTab('map')}
+              onViewImpact={() => setActiveTab('impact')}
               onActiveWalkStateChange={setHasActiveWalkRunning}
             />
           ) : (

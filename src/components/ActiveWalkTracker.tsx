@@ -65,6 +65,7 @@ interface ActiveWalkTrackerProps {
   onSaveHistoricalWalk?: (walk: WalkSession, newPins: EncounterPin[]) => void;
   onSavePin: (pin: EncounterPin) => void;
   onViewMap: () => void;
+  onViewImpact?: () => void;
   onOpenHistoricalEntry?: () => void;
   onActiveWalkStateChange: (isRunning: boolean) => void;
 }
@@ -161,6 +162,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
   onSaveHistoricalWalk,
   onSavePin,
   onViewMap,
+  onViewImpact,
   onActiveWalkStateChange,
 }) => {
   const [walkLoggingMode, setWalkLoggingMode] = useState<'live' | 'past'>('live');
@@ -861,6 +863,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
           onSaveHistoricalWalk={onSaveHistoricalWalk}
           onSaveStandalonePin={onSavePin}
           onViewMap={onViewMap}
+          onViewImpact={onViewImpact}
         />
       ) : (
         <>
@@ -963,7 +966,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
               </div>
               <input
                 type="number"
-                step="0.05"
+                step="any"
                 min="0"
                 value={milesWalked}
                 onChange={(e) => {

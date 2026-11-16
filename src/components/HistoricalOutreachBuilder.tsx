@@ -46,6 +46,7 @@ import {
 } from '../services/cloudSyncService';
 import {
   DateInputWithCalendar,
+  parseFlexibleDateToIso,
   WalkParticipantsSelector,
 } from './WalkFormControls';
 
@@ -58,6 +59,7 @@ interface HistoricalOutreachBuilderProps {
   onSaveHistoricalWalk: (walk: WalkSession, newPins: EncounterPin[]) => void;
   onSaveStandalonePin: (pin: EncounterPin) => void;
   onViewMap?: () => void;
+  onViewImpact?: () => void;
 }
 
 const STREET_COORDS_LOOKUP: Record<string, [number, number]> = {
@@ -174,6 +176,7 @@ export const HistoricalOutreachBuilder: React.FC<
   onSaveHistoricalWalk,
   onSaveStandalonePin,
   onViewMap,
+  onViewImpact,
 }) => {
   const [entryMode, setEntryMode] = useState<'full_walk' | 'standalone_pin'>(
     'full_walk'
@@ -379,9 +382,18 @@ export const HistoricalOutreachBuilder: React.FC<
   const handleSaveFullHistoricalWalk = (e: React.FormEvent) => {
     e.preventDefault();
     const walkId = `walk-hist-${Date.now()}`;
-    const startIso = `${walkDate}T14:00:00.000Z`;
+    const normalizedDate =
+      parseFlexibleDateToIso(walkDate) ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(walkDate)
+        ? walkDate
+        : new Date().toISOString().slice(0, 10));
+    const parsedStartMs = Date.parse(`${normalizedDate}T14:00:00.000Z`);
+    const safeStartMs = Number.isNaN(parsedStartMs)
+      ? Date.now()
+      : parsedStartMs;
+    const startIso = new Date(safeStartMs).toISOString();
     const endIso = new Date(
-      new Date(startIso).getTime() + durationMinutes * 60000
+      safeStartMs + Math.max(1, durationMinutes) * 60000
     ).toISOString();
 
     const finalRoute: [number, number][] =
@@ -469,7 +481,7 @@ export const HistoricalOutreachBuilder: React.FC<
 
     const newWalk: WalkSession = {
       id: walkId,
-      date: walkDate,
+      date: normalizedDate,
       startTime: startIso,
       endTime: endIso,
       durationMinutes,
@@ -523,9 +535,9 @@ export const HistoricalOutreachBuilder: React.FC<
     setTrashWeightLbs(0);
     setNotes('');
     setSavedToast(
-      `Saved past walk for ${walkDate} (${finalMiles} mi, ${volHours} volunteer hrs, ${builtPins.length} prayer pins)!`
+      `✅ Walk Saved Successfully! Date: ${normalizedDate} • Distance: ${finalMiles} mi • Volunteer Hours: ${volHours} hrs • Prayer Pins: ${builtPins.length}`
     );
-    setTimeout(() => setSavedToast(null), 6000);
+    setTimeout(() => setSavedToast(null), 12000);
   };
 
   const handleSaveSinglePastPin = (e: React.FormEvent) => {
@@ -630,7 +642,11 @@ export const HistoricalOutreachBuilder: React.FC<
       )}
 
       {entryMode === 'full_walk' ? (
-        <form onSubmit={handleSaveFullHistoricalWalk} className="space-y-5">
+        <form
+          onSubmit={handleSaveFullHistoricalWalk}
+          noValidate
+          className="space-y-5"
+        >
           {/* STEP 1: INTERACTIVE ROUTE PLOTTER (Start -> Waypoints -> End at Start) */}
           <div className="p-4 rounded-2xl bg-slateDark-950 border-2 border-slate-800 space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -905,9 +921,8 @@ export const HistoricalOutreachBuilder: React.FC<
                 <Route className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="number"
-                  step="0.05"
+                  step="any"
                   min="0"
-                  required
                   value={milesWalked}
                   onChange={(e) =>
                     setMilesWalked(Math.max(0, parseFloat(e.target.value) || 0))
@@ -1227,6 +1242,36 @@ export const HistoricalOutreachBuilder: React.FC<
             />
           </div>
 
+          {/* Confirmation Message Right Above Save Button */}
+          {savedToast && (
+            <div className="p-4 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400 text-emerald-100 shadow-xl space-y-2.5">
+              <div className="flex items-center gap-2.5 text-sm sm:text-base font-black text-emerald-300">
+                <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                <span>{savedToast}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {onViewMap && (
+                  <button
+                    type="button"
+                    onClick={onViewMap}
+                    className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slateDark-950 font-black text-xs shadow"
+                  >
+                    🗺️ View on Street & Prayer Map
+                  </button>
+                )}
+                {onViewImpact && (
+                  <button
+                    type="button"
+                    onClick={onViewImpact}
+                    className="px-4 py-2 rounded-xl bg-phoenix-600 hover:bg-phoenix-500 text-white font-black text-xs shadow"
+                  >
+                    📊 View in Outreach Group Walk Log
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             className="w-full py-4 rounded-2xl bg-gradient-to-r from-phoenix-500 via-phoenix-600 to-phoenix-red hover:from-phoenix-600 hover:to-phoenix-700 text-white font-black text-sm sm:text-base shadow-xl shadow-phoenix-600/25 flex items-center justify-center gap-2 transition"
@@ -1240,7 +1285,7 @@ export const HistoricalOutreachBuilder: React.FC<
         </form>
       ) : (
         /* Standalone Past Prayer / Service Pin Form */
-        <form onSubmit={handleSaveSinglePastPin} className="space-y-4">
+        <form onSubmit={handleSaveSinglePastPin} noValidate className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <DateInputWithCalendar
               label="Date of Prayer / Encounter"
