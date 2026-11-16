@@ -24,7 +24,11 @@ import {
   NEED_CATEGORIES,
   NeedCategoryId,
 } from '../types/hopeDealers';
-import { reverseGeocodeStreet } from '../services/cloudSyncService';
+import {
+  forwardGeocodeStreetInChillicothe,
+  resolveStreetCoordinatesSync,
+  reverseGeocodeStreet,
+} from '../services/cloudSyncService';
 
 interface EncounterPinModalProps {
   isOpen: boolean;
@@ -195,9 +199,10 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const validCount = Math.max(1, peopleCount || 1);
+    const targetStreet = streetName.trim() || 'Chillicothe Outreach';
     const cleanName =
       firstName.trim() ||
       (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
@@ -206,7 +211,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       (encounterType === 'prayer'
         ? `Prayed with ${cleanName} (${validCount} ${
             validCount === 1 ? 'person' : 'people'
-          }) on ${streetName || 'the street'}.`
+          }) on ${targetStreet}.`
         : `Connected ${cleanName} (${validCount} ${
             validCount === 1 ? 'person' : 'people'
           }) with community resources and prayed together.`);
@@ -215,13 +220,24 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       ? `${pinDate}${editingPin.timestamp.slice(10)}`
       : new Date().toISOString();
 
+    let finalCoords = coords;
+    const syncCoord = resolveStreetCoordinatesSync(targetStreet);
+    if (syncCoord) {
+      finalCoords = syncCoord;
+    } else if (!lastKnownGps) {
+      const geocoded = await forwardGeocodeStreetInChillicothe(targetStreet);
+      if (geocoded) {
+        finalCoords = geocoded;
+      }
+    }
+
     const savedPin: EncounterPin = {
       id: editingPin ? editingPin.id : `pin-${Date.now()}`,
       walkId: editingPin ? editingPin.walkId : walkId,
       timestamp: updatedTimestamp,
-      lat: coords[0],
-      lng: coords[1],
-      streetName: streetName.trim() || 'Chillicothe Outreach',
+      lat: finalCoords[0],
+      lng: finalCoords[1],
+      streetName: targetStreet,
       firstName: cleanName,
       peopleCount: validCount,
       description: cleanDesc,
@@ -544,8 +560,15 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             <input
               type="text"
               value={streetName}
-              onChange={(e) => setStreetName(e.target.value)}
-              placeholder="Street or intersection (e.g., Paint St & E Main St)"
+              onChange={(e) => {
+                const val = e.target.value;
+                setStreetName(val);
+                const resolved = resolveStreetCoordinatesSync(val);
+                if (resolved) {
+                  setCoords(resolved);
+                }
+              }}
+              placeholder="Street or intersection (e.g., E 2nd St, McArthur St, Main St)"
               className="w-full px-3 py-2 rounded-lg bg-slateDark-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
             />
 
@@ -597,7 +620,13 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
                 <button
                   key={st}
                   type="button"
-                  onClick={() => setStreetName(st)}
+                  onClick={() => {
+                    setStreetName(st);
+                    const resolved = resolveStreetCoordinatesSync(st);
+                    if (resolved) {
+                      setCoords(resolved);
+                    }
+                  }}
                   className={`shrink-0 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition ${
                     streetName === st
                       ? 'bg-phoenix-500/20 border-phoenix-500 text-phoenix-300'

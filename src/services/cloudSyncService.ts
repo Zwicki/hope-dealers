@@ -106,6 +106,7 @@ export function loadDatabase(): AppDatabaseState {
     parsed.pins = (parsed.pins || []).filter(
       (p) => !p.id.startsWith('pin-seed-')
     );
+    parsed.pins = unstackAndResolvePins(parsed.walks, parsed.pins);
     parsed.users = ensureSuperUser(parsed.users || []);
     parsed.deletedWalkIds = parsed.deletedWalkIds || [];
     parsed.deletedPinIds = parsed.deletedPinIds || [];
@@ -190,10 +191,12 @@ function applyRemoteRecordToLocal(
     .map((w) => ({ ...w, syncStatus: 'synced' as const }))
     .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''));
 
-  const mergedPins = ((record.pins || []) as EncounterPin[])
+  const rawPins = ((record.pins || []) as EncounterPin[])
     .filter((p) => !p.id.startsWith('pin-seed-'))
     .map((p) => ({ ...p, syncStatus: 'synced' as const }))
     .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+  const mergedPins = unstackAndResolvePins(mergedWalks, rawPins);
 
   const mergedUsers = ensureSuperUser((record.users || []) as UserAccount[]);
 
@@ -553,4 +556,376 @@ export async function reverseGeocodeStreet(
   } catch {
     return null;
   }
+}
+
+// ============================================================================
+// STREET-TO-COORDINATES RESOLUTION & ANTI-STACKING FOR CHILLICOTHE, OH
+// ============================================================================
+
+export const CHILLICOTHE_STREET_COORDS: Record<string, [number, number]> = {
+  'e 2nd': [39.3348, -82.9772],
+  'w 2nd': [39.3346, -82.9862],
+  '2nd': [39.3348, -82.9772],
+  'second': [39.3348, -82.9772],
+  'e second': [39.3348, -82.9772],
+  'w second': [39.3346, -82.9862],
+  'mcarthur': [39.3328, -82.9695],
+  'macarthur': [39.3328, -82.9695],
+  'n mcarthur': [39.3338, -82.9693],
+  's mcarthur': [39.3315, -82.9697],
+  'e main': [39.3326, -82.9742],
+  'w main': [39.3330, -82.9885],
+  'main': [39.3326, -82.9742],
+  'paint': [39.3331, -82.9824],
+  'n paint': [39.3355, -82.9822],
+  's paint': [39.3302, -82.9826],
+  'n bridge': [39.3365, -82.9717],
+  's bridge': [39.3295, -82.9719],
+  'bridge': [39.3330, -82.9718],
+  'e water': [39.3361, -82.9795],
+  'w water': [39.3359, -82.9875],
+  'water': [39.3361, -82.9795],
+  'eastern': [39.3278, -82.9675],
+  'western': [39.3338, -82.9960],
+  'n high': [39.3372, -82.9895],
+  's high': [39.3292, -82.9892],
+  'high': [39.3332, -82.9893],
+  'mulberry': [39.3350, -82.9786],
+  'n mulberry': [39.3355, -82.9785],
+  's mulberry': [39.3318, -82.9788],
+  'e 4th': [39.3316, -82.9755],
+  'w 4th': [39.3314, -82.9860],
+  '4th': [39.3316, -82.9755],
+  'fourth': [39.3316, -82.9755],
+  'e 5th': [39.3302, -82.9752],
+  'w 5th': [39.3300, -82.9860],
+  '5th': [39.3302, -82.9752],
+  'fifth': [39.3302, -82.9752],
+  'e 7th': [39.3268, -82.9652],
+  'w 7th': [39.3270, -82.9840],
+  '7th': [39.3268, -82.9652],
+  'seventh': [39.3268, -82.9652],
+  'yoctangee': [39.3385, -82.9815],
+  'scioto': [39.3320, -82.9920],
+  'watt': [39.3305, -82.9750],
+  'n watt': [39.3335, -82.9748],
+  's watt': [39.3285, -82.9750],
+  'ewing': [39.3315, -82.9788],
+  'walnut': [39.3330, -82.9852],
+  'n walnut': [39.3350, -82.9850],
+  's walnut': [39.3305, -82.9854],
+  'hickory': [39.3312, -82.9768],
+  'n hickory': [39.3335, -82.9765],
+  's hickory': [39.3295, -82.9770],
+  'sugar': [39.3325, -82.9722],
+  'n sugar': [39.3342, -82.9720],
+  's sugar': [39.3305, -82.9724],
+  'rose': [39.3342, -82.9682],
+  'n rose': [39.3342, -82.9682],
+  'brownell': [39.3340, -82.9735],
+  'arch': [39.3368, -82.9880],
+  'vine': [39.3295, -82.9805],
+  'mill': [39.3352, -82.9910],
+  'church': [39.3338, -82.9868],
+};
+
+export function normalizeStreetKey(raw: string): string {
+  if (!raw) return '';
+  // Take first street if intersection ("Paint St & E Main St" -> "Paint St")
+  const primary = raw.split(/&|\band\b|\/|@/i)[0].trim().toLowerCase();
+  const tokens = primary
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const normalized: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (i === 0) {
+      if (t === 'east') {
+        normalized.push('e');
+        continue;
+      }
+      if (t === 'west') {
+        normalized.push('w');
+        continue;
+      }
+      if (t === 'north') {
+        normalized.push('n');
+        continue;
+      }
+      if (t === 'south') {
+        normalized.push('s');
+        continue;
+      }
+    }
+    if (
+      [
+        'st',
+        'street',
+        'ave',
+        'avenue',
+        'rd',
+        'road',
+        'pkwy',
+        'parkway',
+        'blvd',
+        'boulevard',
+        'dr',
+        'drive',
+        'ln',
+        'lane',
+        'ct',
+        'court',
+        'aly',
+        'alley',
+        'way',
+        'pl',
+        'place',
+      ].includes(t)
+    ) {
+      continue;
+    }
+    normalized.push(t);
+  }
+  return normalized.join(' ');
+}
+
+export function applyAntiStackOffset(
+  baseCoord: [number, number],
+  existingCoords: Array<[number, number]>
+): [number, number] {
+  let [lat, lng] = baseCoord;
+  let attempts = 0;
+  while (
+    attempts < 12 &&
+    existingCoords.some(
+      (c) =>
+        Math.abs(c[0] - lat) < 0.00018 && Math.abs(c[1] - lng) < 0.00018
+    )
+  ) {
+    attempts++;
+    const angle = attempts * 1.15;
+    const radius = 0.00024 * Math.ceil(attempts / 2);
+    lat = Number((baseCoord[0] + Math.sin(angle) * radius).toFixed(5));
+    lng = Number((baseCoord[1] + Math.cos(angle) * radius).toFixed(5));
+  }
+  return [Number(lat.toFixed(5)), Number(lng.toFixed(5))];
+}
+
+export function resolveStreetCoordinatesSync(
+  streetName: string,
+  routePoints: [number, number][] = [],
+  waypointStreets: Record<number, string> = {},
+  existingCoords: Array<[number, number]> = []
+): [number, number] | null {
+  const key = normalizeStreetKey(streetName);
+  if (!key) return null;
+  const keyWithoutDir = key.replace(/^[ewns]\s+/, '');
+
+  // 1. Check if any waypoint along the walk's route was geocoded to this street
+  for (const [idxStr, wpStreet] of Object.entries(waypointStreets)) {
+    const wpKey = normalizeStreetKey(wpStreet);
+    const wpKeyNoDir = wpKey.replace(/^[ewns]\s+/, '');
+    if (
+      wpKey &&
+      (wpKey === key ||
+        (keyWithoutDir.length >= 3 && wpKeyNoDir === keyWithoutDir))
+    ) {
+      const idx = Number(idxStr);
+      if (routePoints[idx]) {
+        return applyAntiStackOffset(routePoints[idx], existingCoords);
+      }
+    }
+  }
+
+  // 2. Check the Chillicothe street dictionary
+  let baseCoord: [number, number] | undefined =
+    CHILLICOTHE_STREET_COORDS[key] ||
+    CHILLICOTHE_STREET_COORDS[keyWithoutDir];
+
+  if (!baseCoord) {
+    // Partial match against known Chillicothe street keys
+    for (const [dictKey, coord] of Object.entries(CHILLICOTHE_STREET_COORDS)) {
+      if (
+        (keyWithoutDir.length >= 3 && dictKey.includes(keyWithoutDir)) ||
+        (dictKey.length >= 4 && key.includes(dictKey))
+      ) {
+        baseCoord = coord;
+        break;
+      }
+    }
+  }
+
+  if (baseCoord) {
+    // If the walk has route points and one of the route points is close to this street (within ~0.22 miles),
+    // snap near that route segment or blend so the pin sits naturally along the walked path on that street
+    if (routePoints.length > 0) {
+      let closestPt: [number, number] | null = null;
+      let minDist = Infinity;
+      for (const pt of routePoints) {
+        const d = calculateDistanceMiles(baseCoord[0], baseCoord[1], pt[0], pt[1]);
+        if (d < minDist) {
+          minDist = d;
+          closestPt = pt;
+        }
+      }
+      if (closestPt && minDist <= 0.14) {
+        return applyAntiStackOffset(closestPt, existingCoords);
+      }
+    }
+    return applyAntiStackOffset(baseCoord, existingCoords);
+  }
+
+  return null;
+}
+
+// Forward-geocode any street name in Chillicothe, OH using OpenStreetMap Nominatim (with sync fallback)
+export async function forwardGeocodeStreetInChillicothe(
+  streetName: string,
+  routePoints: [number, number][] = [],
+  waypointStreets: Record<number, string> = {},
+  existingCoords: Array<[number, number]> = []
+): Promise<[number, number] | null> {
+  // First check fast sync resolver (waypoint match + Chillicothe street dictionary)
+  const syncMatch = resolveStreetCoordinatesSync(
+    streetName,
+    routePoints,
+    waypointStreets,
+    existingCoords
+  );
+  if (syncMatch) return syncMatch;
+
+  const clean = (streetName || '').trim();
+  if (!clean) return null;
+
+  try {
+    const query = `${clean}, Chillicothe, OH`;
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(
+        query
+      )}&limit=5&viewbox=-83.05,39.38,-82.91,39.28&bounded=1`,
+      {
+        headers: { Accept: 'application/json' },
+      }
+    );
+    if (res.ok) {
+      const results = (await res.json()) as Array<{
+        lat?: string;
+        lon?: string;
+      }>;
+      if (Array.isArray(results) && results.length > 0) {
+        const candidates: [number, number][] = results
+          .map(
+            (r) =>
+              [Number(r.lat), Number(r.lon)] as [number, number]
+          )
+          .filter((c) => !Number.isNaN(c[0]) && !Number.isNaN(c[1]));
+
+        if (candidates.length > 0) {
+          // Pick candidate closest to the walk's route if routePoints exist
+          let best = candidates[0];
+          if (routePoints.length > 0) {
+            let bestDist = Infinity;
+            for (const cand of candidates) {
+              for (const rPt of routePoints) {
+                const d = calculateDistanceMiles(
+                  cand[0],
+                  cand[1],
+                  rPt[0],
+                  rPt[1]
+                );
+                if (d < bestDist) {
+                  bestDist = d;
+                  best = cand;
+                }
+              }
+            }
+          }
+          return applyAntiStackOffset(
+            [Number(best[0].toFixed(5)), Number(best[1].toFixed(5))],
+            existingCoords
+          );
+        }
+      }
+    }
+  } catch {
+    // ignore network error
+  }
+
+  return null;
+}
+
+// Automatically unstack existing pins that were stacked at a single location when different streetNames were specified
+export function unstackAndResolvePins(
+  walks: WalkSession[],
+  pins: EncounterPin[]
+): EncounterPin[] {
+  if (!pins || pins.length === 0) return [];
+
+  const walksById = new Map<string, WalkSession>();
+  (walks || []).forEach((w) => walksById.set(w.id, w));
+
+  // Count how many pins share each rounded coordinate
+  const coordCounts = new Map<string, number>();
+  pins.forEach((p) => {
+    const key = `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
+    coordCounts.set(key, (coordCounts.get(key) || 0) + 1);
+  });
+
+  const placedCoords: Array<[number, number]> = [];
+
+  return pins.map((pin) => {
+    const coordKey = `${pin.lat.toFixed(4)},${pin.lng.toFixed(4)}`;
+    const isStacked = (coordCounts.get(coordKey) || 0) > 1;
+    const walk = walksById.get(pin.walkId);
+    const routePts = walk?.gpsPath || [];
+
+    // Check if pin is sitting on the walk's start point or default center while specifying a known street
+    const isAtStartPoint =
+      walk?.startPoint &&
+      Math.abs(pin.lat - walk.startPoint.lat) < 0.0002 &&
+      Math.abs(pin.lng - walk.startPoint.lng) < 0.0002;
+
+    const resolvedForStreet = resolveStreetCoordinatesSync(
+      pin.streetName,
+      routePts,
+      {},
+      placedCoords
+    );
+
+    if (resolvedForStreet) {
+      const distFromResolved = calculateDistanceMiles(
+        pin.lat,
+        pin.lng,
+        resolvedForStreet[0],
+        resolvedForStreet[1]
+      );
+      // If pins were stacked together or placed > 0.08 miles away from the street named on the pin, move to the street!
+      if (isStacked || isAtStartPoint || distFromResolved > 0.08) {
+        placedCoords.push(resolvedForStreet);
+        return {
+          ...pin,
+          lat: resolvedForStreet[0],
+          lng: resolvedForStreet[1],
+        };
+      }
+    }
+
+    if (isStacked) {
+      const offsetCoord = applyAntiStackOffset(
+        [pin.lat, pin.lng],
+        placedCoords
+      );
+      placedCoords.push(offsetCoord);
+      return {
+        ...pin,
+        lat: offsetCoord[0],
+        lng: offsetCoord[1],
+      };
+    }
+
+    placedCoords.push([pin.lat, pin.lng]);
+    return pin;
+  });
 }

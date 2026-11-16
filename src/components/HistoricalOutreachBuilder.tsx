@@ -41,7 +41,10 @@ import {
   WalkSession,
 } from '../types/hopeDealers';
 import {
+  applyAntiStackOffset,
   calculateDistanceMiles,
+  forwardGeocodeStreetInChillicothe,
+  resolveStreetCoordinatesSync,
   reverseGeocodeStreet,
 } from '../services/cloudSyncService';
 import {
@@ -209,6 +212,9 @@ export const HistoricalOutreachBuilder: React.FC<
     'route' | 'interaction' | 'prayer_pin'
   >('route');
   const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
+  const [waypointStreets, setWaypointStreets] = useState<Record<number, string>>(
+    {}
+  );
   const [isLoopClosed, setIsLoopClosed] = useState<boolean>(false);
   const [interactionSpots, setInteractionSpots] = useState<[number, number][]>(
     []
@@ -225,6 +231,8 @@ export const HistoricalOutreachBuilder: React.FC<
   const [pinCoords, setPinCoords] = useState<[number, number]>(
     CHILLICOTHE_CENTER
   );
+  const [hasCustomClickedPinCoords, setHasCustomClickedPinCoords] =
+    useState<boolean>(false);
   const [standalonePinDate, setStandalonePinDate] = useState<string>(
     new Date(Date.now() - 86400000).toISOString().slice(0, 10)
   );
@@ -267,6 +275,7 @@ export const HistoricalOutreachBuilder: React.FC<
   const handleMapClick = async (lat: number, lng: number) => {
     if (entryMode === 'standalone_pin' || mapClickMode === 'prayer_pin') {
       setPinCoords([lat, lng]);
+      setHasCustomClickedPinCoords(true);
       const detected = await reverseGeocodeStreet(lat, lng);
       if (detected) {
         setPinStreet(detected);
@@ -278,17 +287,15 @@ export const HistoricalOutreachBuilder: React.FC<
     }
 
     if (mapClickMode === 'route') {
+      const wpIndex = routePoints.length;
       const nextPts: [number, number][] = [...routePoints, [lat, lng]];
       setRoutePoints(nextPts);
       setIsLoopClosed(false);
       recomputeRouteMiles(nextPts);
 
-      // Also update default prayer pin coords to latest waypoint for convenience
-      setPinCoords([lat, lng]);
-
       const detected = await reverseGeocodeStreet(lat, lng);
       if (detected) {
-        setPinStreet(detected);
+        setWaypointStreets((prev) => ({ ...prev, [wpIndex]: detected }));
         setStreetsWalked((prev) =>
           prev.includes(detected) ? prev : [...prev, detected]
         );
@@ -310,6 +317,7 @@ export const HistoricalOutreachBuilder: React.FC<
 
   const handleClearRoute = () => {
     setRoutePoints([]);
+    setWaypointStreets({});
     setIsLoopClosed(false);
     setMilesWalked(0);
   };
@@ -349,8 +357,12 @@ export const HistoricalOutreachBuilder: React.FC<
     );
   };
 
-  const handleAddDraftPinToWalk = () => {
+  const handleAddDraftPinToWalk = async () => {
     const validCount = Math.max(1, pinPeopleCount || 1);
+    const targetStreet =
+      pinStreet.trim() ||
+      streetsWalked[draftPins.length % Math.max(1, streetsWalked.length)] ||
+      'Paint St';
     const cleanName =
       pinFirstName.trim() ||
       (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
@@ -358,7 +370,43 @@ export const HistoricalOutreachBuilder: React.FC<
       pinDescription.trim() ||
       `Prayed with ${cleanName} (${validCount} ${
         validCount === 1 ? 'person' : 'people'
-      }) on ${pinStreet || streetsWalked[0] || 'the street'}.`;
+      }) on ${targetStreet}.`;
+
+    const existingDraftCoords: Array<[number, number]> = draftPins.map((d) => [
+      d.lat,
+      d.lng,
+    ]);
+
+    let resolvedLatLng: [number, number] | null = null;
+    if (hasCustomClickedPinCoords) {
+      resolvedLatLng = applyAntiStackOffset(pinCoords, existingDraftCoords);
+    } else {
+      resolvedLatLng = await forwardGeocodeStreetInChillicothe(
+        targetStreet,
+        routePoints,
+        waypointStreets,
+        existingDraftCoords
+      );
+      if (!resolvedLatLng) {
+        const fallbackBase =
+          routePoints.length > 0
+            ? routePoints[draftPins.length % routePoints.length]
+            : pinCoords;
+        resolvedLatLng = applyAntiStackOffset(
+          fallbackBase,
+          existingDraftCoords
+        );
+      }
+    }
+
+    if (
+      targetStreet &&
+      !streetsWalked.some(
+        (s) => s.toLowerCase() === targetStreet.toLowerCase()
+      )
+    ) {
+      setStreetsWalked((prev) => [...prev, targetStreet]);
+    }
 
     const newDraft: DraftPrayerPin = {
       id: `draft-pin-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -367,9 +415,9 @@ export const HistoricalOutreachBuilder: React.FC<
       type: pinType,
       needCategories: pinNeeds,
       description: cleanDesc,
-      streetName: pinStreet.trim() || streetsWalked[0] || 'Paint St',
-      lat: pinCoords[0],
-      lng: pinCoords[1],
+      streetName: targetStreet,
+      lat: resolvedLatLng[0],
+      lng: resolvedLatLng[1],
     };
 
     const nextDrafts = [...draftPins, newDraft];
@@ -387,10 +435,12 @@ export const HistoricalOutreachBuilder: React.FC<
     setPinFirstName('');
     setPinPeopleCount(1);
     setPinDescription('');
+    setPinStreet('');
     setPinNeeds([]);
+    setHasCustomClickedPinCoords(false);
   };
 
-  const handleSaveFullHistoricalWalk = (e: React.FormEvent) => {
+  const handleSaveFullHistoricalWalk = async (e: React.FormEvent) => {
     e.preventDefault();
     const walkId = `walk-hist-${Date.now()}`;
     const normalizedDate =
@@ -431,8 +481,17 @@ export const HistoricalOutreachBuilder: React.FC<
 
     // Automatically include any typed person in the Prayer Pin inputs even if the user didn't click "Add Person to This Walk" first
     const allDraftPins: DraftPrayerPin[] = [...draftPins];
-    if (pinFirstName.trim() || pinDescription.trim() || pinNeeds.length > 0) {
+    if (
+      pinFirstName.trim() ||
+      pinDescription.trim() ||
+      pinStreet.trim() ||
+      pinNeeds.length > 0
+    ) {
       const validCount = Math.max(1, pinPeopleCount || 1);
+      const targetStreet =
+        pinStreet.trim() ||
+        streetsWalked[allDraftPins.length % Math.max(1, streetsWalked.length)] ||
+        'Paint St';
       const cleanName =
         pinFirstName.trim() ||
         (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
@@ -440,7 +499,24 @@ export const HistoricalOutreachBuilder: React.FC<
         pinDescription.trim() ||
         `Prayed with ${cleanName} (${validCount} ${
           validCount === 1 ? 'person' : 'people'
-        }) on ${pinStreet || streetsWalked[0] || 'the street'}.`;
+        }) on ${targetStreet}.`;
+
+      const existingCoords = allDraftPins.map(
+        (d) => [d.lat, d.lng] as [number, number]
+      );
+      const autoCoord = hasCustomClickedPinCoords
+        ? applyAntiStackOffset(pinCoords, existingCoords)
+        : (await forwardGeocodeStreetInChillicothe(
+            targetStreet,
+            finalRoute,
+            waypointStreets,
+            existingCoords
+          )) ||
+          applyAntiStackOffset(
+            finalRoute[allDraftPins.length % finalRoute.length] ?? pinCoords,
+            existingCoords
+          );
+
       allDraftPins.push({
         id: `draft-pin-auto-${Date.now()}`,
         firstName: cleanName,
@@ -448,30 +524,66 @@ export const HistoricalOutreachBuilder: React.FC<
         type: pinType,
         needCategories: pinNeeds,
         description: cleanDesc,
-        streetName: pinStreet.trim() || streetsWalked[0] || 'Paint St',
-        lat: finalRoute[Math.floor(finalRoute.length / 2)]?.[0] ?? pinCoords[0],
-        lng: finalRoute[Math.floor(finalRoute.length / 2)]?.[1] ?? pinCoords[1],
+        streetName: targetStreet,
+        lat: autoCoord[0],
+        lng: autoCoord[1],
       });
     }
 
-    const builtPins: EncounterPin[] = allDraftPins.map((dp, idx) => ({
-      id: `pin-hist-${Date.now()}-${idx}`,
-      walkId,
-      timestamp: new Date(
-        new Date(startIso).getTime() + (idx + 1) * 600000
-      ).toISOString(),
-      lat: dp.lat,
-      lng: dp.lng,
-      streetName: dp.streetName,
-      firstName: dp.firstName,
-      peopleCount: Math.max(1, dp.peopleCount || 1),
-      description: dp.description,
-      type: dp.type,
-      needCategories: dp.needCategories,
-      loggedByRecorder: currentUser.name,
-      groupMembers,
-      syncStatus: navigator.onLine ? 'synced' : 'pending',
-    }));
+    // Ensure every draft pin is placed on its indicated street and never stacked on another pin
+    const placedPinCoords: Array<[number, number]> = [];
+    const builtPins: EncounterPin[] = [];
+    for (let idx = 0; idx < allDraftPins.length; idx++) {
+      const dp = allDraftPins[idx];
+      let finalLat = dp.lat;
+      let finalLng = dp.lng;
+
+      // Verify if dp.lat/lng is stacked with an already placed pin, or resolve by streetName
+      const isStackedWithPrev = placedPinCoords.some(
+        (c) =>
+          Math.abs(c[0] - finalLat) < 0.00018 &&
+          Math.abs(c[1] - finalLng) < 0.00018
+      );
+      if (isStackedWithPrev) {
+        const streetResolved = await forwardGeocodeStreetInChillicothe(
+          dp.streetName,
+          finalRoute,
+          waypointStreets,
+          placedPinCoords
+        );
+        if (streetResolved) {
+          finalLat = streetResolved[0];
+          finalLng = streetResolved[1];
+        } else {
+          const offset = applyAntiStackOffset(
+            [finalLat, finalLng],
+            placedPinCoords
+          );
+          finalLat = offset[0];
+          finalLng = offset[1];
+        }
+      }
+
+      placedPinCoords.push([finalLat, finalLng]);
+      builtPins.push({
+        id: `pin-hist-${Date.now()}-${idx}`,
+        walkId,
+        timestamp: new Date(
+          new Date(startIso).getTime() + (idx + 1) * 600000
+        ).toISOString(),
+        lat: finalLat,
+        lng: finalLng,
+        streetName: dp.streetName,
+        firstName: dp.firstName,
+        peopleCount: Math.max(1, dp.peopleCount || 1),
+        description: dp.description,
+        type: dp.type,
+        needCategories: dp.needCategories,
+        loggedByRecorder: currentUser.name,
+        groupMembers,
+        syncStatus: navigator.onLine ? 'synced' : 'pending',
+      });
+    }
 
     const totalPeopleFromPins = builtPins.reduce(
       (sum, p) => sum + Math.max(1, p.peopleCount || 1),
@@ -541,12 +653,15 @@ export const HistoricalOutreachBuilder: React.FC<
 
     onSaveHistoricalWalk(newWalk, builtPins);
     setRoutePoints([]);
+    setWaypointStreets({});
     setIsLoopClosed(false);
     setMilesWalked(0);
     setStreetsWalked([]);
     setDraftPins([]);
     setPinFirstName('');
     setPinDescription('');
+    setPinStreet('');
+    setHasCustomClickedPinCoords(false);
     setPinNeeds([]);
     setInteractionSpots([]);
     setInteractionsCount(0);
@@ -561,9 +676,10 @@ export const HistoricalOutreachBuilder: React.FC<
     setTimeout(() => setSavedToast(null), 12000);
   };
 
-  const handleSaveSinglePastPin = (e: React.FormEvent) => {
+  const handleSaveSinglePastPin = async (e: React.FormEvent) => {
     e.preventDefault();
     const validCount = Math.max(1, pinPeopleCount || 1);
+    const targetStreet = pinStreet.trim() || 'Paint St';
     const cleanName =
       pinFirstName.trim() ||
       (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
@@ -571,7 +687,7 @@ export const HistoricalOutreachBuilder: React.FC<
       pinDescription.trim() ||
       `Prayed with ${cleanName} (${validCount} ${
         validCount === 1 ? 'person' : 'people'
-      }) on ${pinStreet || 'the street'}.`;
+      }) on ${targetStreet}.`;
 
     const normalizedPinDate =
       parseFlexibleDateToIso(standalonePinDate) ||
@@ -579,13 +695,21 @@ export const HistoricalOutreachBuilder: React.FC<
         ? standalonePinDate
         : new Date().toISOString().slice(0, 10));
 
+    let finalCoord = pinCoords;
+    if (!hasCustomClickedPinCoords) {
+      const geocoded = await forwardGeocodeStreetInChillicothe(targetStreet);
+      if (geocoded) {
+        finalCoord = geocoded;
+      }
+    }
+
     const pin: EncounterPin = {
       id: `pin-past-${Date.now()}`,
       walkId: 'walk-historical-standalone',
       timestamp: `${normalizedPinDate}T15:00:00.000Z`,
-      lat: pinCoords[0],
-      lng: pinCoords[1],
-      streetName: pinStreet.trim() || 'Paint St',
+      lat: finalCoord[0],
+      lng: finalCoord[1],
+      streetName: targetStreet,
       firstName: cleanName,
       peopleCount: validCount,
       description: cleanDesc,
@@ -600,7 +724,9 @@ export const HistoricalOutreachBuilder: React.FC<
     setPinFirstName('');
     setPinPeopleCount(1);
     setPinDescription('');
+    setPinStreet('');
     setPinNeeds([]);
+    setHasCustomClickedPinCoords(false);
     setSavedToast(
       `✅ Saved past prayer/service pin for ${cleanName} (${validCount} ${
         validCount === 1 ? 'person' : 'people'
@@ -1194,8 +1320,21 @@ export const HistoricalOutreachBuilder: React.FC<
               <input
                 type="text"
                 value={pinStreet}
-                onChange={(e) => setPinStreet(e.target.value)}
-                placeholder="Street Name (e.g., Paint St)"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPinStreet(val);
+                  setHasCustomClickedPinCoords(false);
+                  const resolved = resolveStreetCoordinatesSync(
+                    val,
+                    routePoints,
+                    waypointStreets,
+                    draftPins.map((d) => [d.lat, d.lng])
+                  );
+                  if (resolved) {
+                    setPinCoords(resolved);
+                  }
+                }}
+                placeholder="Street Name (e.g., E 2nd St, McArthur St)"
                 className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
               />
 
