@@ -559,79 +559,143 @@ export async function reverseGeocodeStreet(
 }
 
 // ============================================================================
-// STREET-TO-COORDINATES RESOLUTION & ANTI-STACKING FOR CHILLICOTHE, OH
+// ROUTE-LOCKED STREET PIN PLACEMENT & SEGMENT MATCHING FOR CHILLICOTHE, OH
 // ============================================================================
+
+const SEGMENT_STREET_CACHE_KEY = 'lrs_hope_dealers_seg_streets_v1';
+
+function loadSegmentStreetCache(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(SEGMENT_STREET_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveSegmentStreetToCache(
+  midLat: number,
+  midLng: number,
+  streetName: string
+): void {
+  try {
+    const cache = loadSegmentStreetCache();
+    const key = `${midLat.toFixed(4)},${midLng.toFixed(4)}`;
+    cache[key] = streetName;
+    localStorage.setItem(SEGMENT_STREET_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // ignore
+  }
+}
+
+export function getCachedSegmentStreet(
+  midLat: number,
+  midLng: number
+): string | undefined {
+  const cache = loadSegmentStreetCache();
+  return cache[`${midLat.toFixed(4)},${midLng.toFixed(4)}`];
+}
+
+// North-to-South rank of Chillicothe East-West streets (smaller = further North)
+const EW_STREET_NS_RANK: Record<string, number> = {
+  yoctangee: 1,
+  water: 2,
+  '2nd': 3,
+  second: 3,
+  main: 4,
+  '4th': 5,
+  fourth: 5,
+  '5th': 6,
+  fifth: 6,
+  '7th': 7,
+  seventh: 7,
+  eastern: 8,
+};
+
+// West-to-East rank of Chillicothe North-South streets (smaller = further West)
+const NS_STREET_WE_RANK: Record<string, number> = {
+  western: 1,
+  scioto: 1,
+  high: 2,
+  arch: 2,
+  mill: 2,
+  walnut: 3,
+  church: 3,
+  paint: 4,
+  vine: 4,
+  mulberry: 5,
+  hickory: 6,
+  ewing: 7,
+  bridge: 8,
+  sugar: 9,
+  watt: 10,
+  brownell: 11,
+  mcarthur: 12,
+  macarthur: 12,
+  rose: 13,
+};
 
 export const CHILLICOTHE_STREET_COORDS: Record<string, [number, number]> = {
   'e 2nd': [39.3348, -82.9772],
   'w 2nd': [39.3346, -82.9862],
   '2nd': [39.3348, -82.9772],
-  'second': [39.3348, -82.9772],
+  second: [39.3348, -82.9772],
   'e second': [39.3348, -82.9772],
   'w second': [39.3346, -82.9862],
-  'mcarthur': [39.3328, -82.9695],
-  'macarthur': [39.3328, -82.9695],
-  'n mcarthur': [39.3338, -82.9693],
-  's mcarthur': [39.3315, -82.9697],
+  mcarthur: [39.3338, -82.9623],
+  macarthur: [39.3338, -82.9623],
+  'n mcarthur': [39.3342, -82.9624],
+  's mcarthur': [39.3325, -82.9621],
   'e main': [39.3326, -82.9742],
-  'w main': [39.3330, -82.9885],
-  'main': [39.3326, -82.9742],
-  'paint': [39.3331, -82.9824],
+  'w main': [39.333, -82.9885],
+  main: [39.3326, -82.9742],
+  paint: [39.3331, -82.9824],
   'n paint': [39.3355, -82.9822],
   's paint': [39.3302, -82.9826],
   'n bridge': [39.3365, -82.9717],
   's bridge': [39.3295, -82.9719],
-  'bridge': [39.3330, -82.9718],
+  bridge: [39.333, -82.9718],
   'e water': [39.3361, -82.9795],
   'w water': [39.3359, -82.9875],
-  'water': [39.3361, -82.9795],
-  'eastern': [39.3278, -82.9675],
-  'western': [39.3338, -82.9960],
+  water: [39.3361, -82.9795],
+  eastern: [39.3278, -82.9675],
+  western: [39.3338, -82.996],
   'n high': [39.3372, -82.9895],
   's high': [39.3292, -82.9892],
-  'high': [39.3332, -82.9893],
-  'mulberry': [39.3350, -82.9786],
-  'n mulberry': [39.3355, -82.9785],
-  's mulberry': [39.3318, -82.9788],
+  high: [39.3332, -82.9893],
+  mulberry: [39.335, -82.9786],
   'e 4th': [39.3316, -82.9755],
-  'w 4th': [39.3314, -82.9860],
+  'w 4th': [39.3314, -82.986],
   '4th': [39.3316, -82.9755],
-  'fourth': [39.3316, -82.9755],
+  fourth: [39.3316, -82.9755],
   'e 5th': [39.3302, -82.9752],
-  'w 5th': [39.3300, -82.9860],
+  'w 5th': [39.33, -82.986],
   '5th': [39.3302, -82.9752],
-  'fifth': [39.3302, -82.9752],
+  fifth: [39.3302, -82.9752],
   'e 7th': [39.3268, -82.9652],
-  'w 7th': [39.3270, -82.9840],
   '7th': [39.3268, -82.9652],
-  'seventh': [39.3268, -82.9652],
-  'yoctangee': [39.3385, -82.9815],
-  'scioto': [39.3320, -82.9920],
-  'watt': [39.3305, -82.9750],
-  'n watt': [39.3335, -82.9748],
-  's watt': [39.3285, -82.9750],
-  'ewing': [39.3315, -82.9788],
-  'walnut': [39.3330, -82.9852],
-  'n walnut': [39.3350, -82.9850],
-  's walnut': [39.3305, -82.9854],
-  'hickory': [39.3312, -82.9768],
-  'n hickory': [39.3335, -82.9765],
-  's hickory': [39.3295, -82.9770],
-  'sugar': [39.3325, -82.9722],
-  'n sugar': [39.3342, -82.9720],
-  's sugar': [39.3305, -82.9724],
-  'rose': [39.3342, -82.9682],
-  'n rose': [39.3342, -82.9682],
-  'brownell': [39.3340, -82.9735],
-  'arch': [39.3368, -82.9880],
-  'vine': [39.3295, -82.9805],
-  'mill': [39.3352, -82.9910],
-  'church': [39.3338, -82.9868],
+  seventh: [39.3268, -82.9652],
+  yoctangee: [39.3385, -82.9815],
+  scioto: [39.332, -82.992],
+  watt: [39.3305, -82.966],
+  'n watt': [39.3335, -82.966],
+  's watt': [39.3285, -82.966],
+  ewing: [39.3315, -82.9748],
+  walnut: [39.333, -82.9852],
+  hickory: [39.3312, -82.9768],
+  sugar: [39.3325, -82.969],
+  'n sugar': [39.3342, -82.969],
+  's sugar': [39.3305, -82.969],
+  rose: [39.3342, -82.959],
+  brownell: [39.334, -82.9642],
+  arch: [39.3368, -82.988],
+  vine: [39.3295, -82.9805],
+  mill: [39.3352, -82.991],
+  church: [39.3338, -82.9868],
 };
 
 export function normalizeStreetKey(raw: string): string {
   if (!raw) return '';
-  // Take first street if intersection ("Paint St & E Main St" -> "Paint St")
   const primary = raw.split(/&|\band\b|\/|@/i)[0].trim().toLowerCase();
   const tokens = primary
     .replace(/[^a-z0-9\s]/g, ' ')
@@ -691,6 +755,214 @@ export function normalizeStreetKey(raw: string): string {
   return normalized.join(' ');
 }
 
+export function getCoreStreetName(raw: string): string {
+  return normalizeStreetKey(raw).replace(/^[ewns]\s+/, '');
+}
+
+export interface RouteSegmentInfo {
+  index: number;
+  start: [number, number];
+  end: [number, number];
+  mid: [number, number];
+  dLat: number;
+  dLng: number;
+  lengthMiles: number;
+  isEastWest: boolean;
+  isNorthSouth: boolean;
+  cachedStreetKey: string;
+  cachedCoreKey: string;
+}
+
+export function buildRouteSegments(
+  routePoints: [number, number][],
+  segmentStreetsOverride: Record<number, string> = {}
+): RouteSegmentInfo[] {
+  const segments: RouteSegmentInfo[] = [];
+  if (!routePoints || routePoints.length < 2) return segments;
+
+  for (let i = 0; i < routePoints.length - 1; i++) {
+    const start = routePoints[i];
+    const end = routePoints[i + 1];
+    const lengthMiles = calculateDistanceMiles(
+      start[0],
+      start[1],
+      end[0],
+      end[1]
+    );
+    if (lengthMiles < 0.001) continue;
+
+    const mid: [number, number] = [
+      (start[0] + end[0]) / 2,
+      (start[1] + end[1]) / 2,
+    ];
+    const dLat = Math.abs(end[0] - start[0]);
+    const dLng = Math.abs(end[1] - start[1]) * 0.78; // cosine latitude scaling at 39.33°N
+
+    const rawStreet =
+      segmentStreetsOverride[i] || getCachedSegmentStreet(mid[0], mid[1]) || '';
+    const cachedStreetKey = normalizeStreetKey(rawStreet);
+    const cachedCoreKey = getCoreStreetName(rawStreet);
+
+    segments.push({
+      index: i,
+      start,
+      end,
+      mid,
+      dLat,
+      dLng,
+      lengthMiles,
+      isEastWest: dLng >= dLat * 0.65,
+      isNorthSouth: dLat >= dLng * 0.65,
+      cachedStreetKey,
+      cachedCoreKey,
+    });
+  }
+  return segments;
+}
+
+// Match a street name to the exact segment of the walk's route
+export function matchStreetToRouteSegment(
+  streetName: string,
+  segments: RouteSegmentInfo[],
+  allWalkStreets: string[] = []
+): RouteSegmentInfo | null {
+  if (segments.length === 0) return null;
+  if (segments.length === 1) return segments[0];
+
+  const key = normalizeStreetKey(streetName);
+  const core = getCoreStreetName(streetName);
+  if (!core) return segments[0];
+
+  // 1. Direct match against reverse-geocoded segment street name
+  const directMatches = segments.filter(
+    (s) =>
+      s.cachedCoreKey &&
+      (s.cachedStreetKey === key ||
+        s.cachedCoreKey === core ||
+        (core.length >= 3 && s.cachedCoreKey.includes(core)) ||
+        (s.cachedCoreKey.length >= 3 && core.includes(s.cachedCoreKey)))
+  );
+  if (directMatches.length > 0) {
+    // Return longest matching segment
+    return directMatches.reduce((a, b) =>
+      b.lengthMiles > a.lengthMiles ? b : a
+    );
+  }
+
+  // 2. Match East-West street by North-to-South rank within the route's E-W segments
+  const ewRank = EW_STREET_NS_RANK[core];
+  if (ewRank !== undefined) {
+    const ewSegments = segments.filter((s) => s.isEastWest);
+    const pool = ewSegments.length > 0 ? ewSegments : segments;
+    // Sort pool from North (highest lat) to South (lowest lat)
+    const sortedNorthToSouth = [...pool].sort((a, b) => b.mid[0] - a.mid[0]);
+
+    // Find all unique E-W streets involved in this walk
+    const walkEwRanks = Array.from(
+      new Set(
+        [streetName, ...allWalkStreets]
+          .map((st) => EW_STREET_NS_RANK[getCoreStreetName(st)])
+          .filter((r): r is number => r !== undefined)
+      )
+    ).sort((a, b) => a - b);
+
+    const rankIdx = walkEwRanks.indexOf(ewRank);
+    if (walkEwRanks.length > 1 && sortedNorthToSouth.length > 1) {
+      if (rankIdx === 0) {
+        return sortedNorthToSouth[0]; // Northernmost E-W segment
+      }
+      if (rankIdx === walkEwRanks.length - 1) {
+        return sortedNorthToSouth[sortedNorthToSouth.length - 1]; // Southernmost E-W segment
+      }
+      const mappedIdx = Math.min(
+        sortedNorthToSouth.length - 1,
+        Math.round(
+          (rankIdx / (walkEwRanks.length - 1)) * (sortedNorthToSouth.length - 1)
+        )
+      );
+      return sortedNorthToSouth[mappedIdx];
+    }
+    return sortedNorthToSouth[0];
+  }
+
+  // 3. Match North-South street by West-to-East rank within the route's N-S segments
+  const nsRank = NS_STREET_WE_RANK[core];
+  if (nsRank !== undefined) {
+    const nsSegments = segments.filter((s) => s.isNorthSouth);
+    const pool = nsSegments.length > 0 ? nsSegments : segments;
+
+    // Find all unique N-S streets involved in this walk
+    const walkNsRanks = Array.from(
+      new Set(
+        [streetName, ...allWalkStreets]
+          .map((st) => NS_STREET_WE_RANK[getCoreStreetName(st)])
+          .filter((r): r is number => r !== undefined)
+      )
+    ).sort((a, b) => a - b);
+
+    // Sort pool from West (lowest lng) to East (highest lng)
+    const sortedWestToEast = [...pool].sort((a, b) => a.mid[1] - b.mid[1]);
+
+    if (walkNsRanks.length > 1 && sortedWestToEast.length > 1) {
+      const rankIdx = walkNsRanks.indexOf(nsRank);
+      if (rankIdx === 0) return sortedWestToEast[0];
+      if (rankIdx === walkNsRanks.length - 1) {
+        return sortedWestToEast[sortedWestToEast.length - 1];
+      }
+    }
+
+    // If only 1 N-S street was specified on a closed loop (e.g. McArthur St on the east end of an E 2nd -> McArthur -> Main loop),
+    // prefer the non-closing N-S segment (or the easternmost N-S segment for eastern streets like McArthur)
+    if (nsRank >= 10 && sortedWestToEast.length > 1) {
+      return sortedWestToEast[sortedWestToEast.length - 1];
+    }
+    const nonClosingPool =
+      pool.length > 1 && segments.length >= 3
+        ? pool.filter((s) => s.index !== segments.length - 1)
+        : pool;
+    return nonClosingPool[0] || pool[0];
+  }
+
+  // 4. Match by position in allWalkStreets
+  const streetIdx = allWalkStreets.findIndex(
+    (s) => getCoreStreetName(s) === core
+  );
+  if (streetIdx >= 0) {
+    return segments[streetIdx % segments.length];
+  }
+
+  return segments[0];
+}
+
+export function interpolatePointOnSegment(
+  seg: RouteSegmentInfo,
+  pinIndexOnSegment: number,
+  totalPinsOnSegment: number
+): [number, number] {
+  const t = (pinIndexOnSegment + 1) / (totalPinsOnSegment + 1);
+  const lat = seg.start[0] + t * (seg.end[0] - seg.start[0]);
+  const lng = seg.start[1] + t * (seg.end[1] - seg.start[1]);
+  return [Number(lat.toFixed(5)), Number(lng.toFixed(5))];
+}
+
+// Minimum distance (in miles) from a point [lat, lng] to a route segment
+function distancePointToSegmentMiles(
+  lat: number,
+  lng: number,
+  seg: RouteSegmentInfo
+): number {
+  const A = lat - seg.start[0];
+  const B = lng - seg.start[1];
+  const C = seg.end[0] - seg.start[0];
+  const D = seg.end[1] - seg.start[1];
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  const param = lenSq !== 0 ? Math.max(0, Math.min(1, dot / lenSq)) : 0;
+  const projLat = seg.start[0] + param * C;
+  const projLng = seg.start[1] + param * D;
+  return calculateDistanceMiles(lat, lng, projLat, projLng);
+}
+
 export function applyAntiStackOffset(
   baseCoord: [number, number],
   existingCoords: Array<[number, number]>
@@ -721,73 +993,80 @@ export function resolveStreetCoordinatesSync(
 ): [number, number] | null {
   const key = normalizeStreetKey(streetName);
   if (!key) return null;
-  const keyWithoutDir = key.replace(/^[ewns]\s+/, '');
+  const core = getCoreStreetName(streetName);
 
-  // 1. Check if any waypoint along the walk's route was geocoded to this street
-  for (const [idxStr, wpStreet] of Object.entries(waypointStreets)) {
-    const wpKey = normalizeStreetKey(wpStreet);
-    const wpKeyNoDir = wpKey.replace(/^[ewns]\s+/, '');
-    if (
-      wpKey &&
-      (wpKey === key ||
-        (keyWithoutDir.length >= 3 && wpKeyNoDir === keyWithoutDir))
-    ) {
-      const idx = Number(idxStr);
-      if (routePoints[idx]) {
-        return applyAntiStackOffset(routePoints[idx], existingCoords);
+  // PRIORITY 1: If the walk has a plotted route (routePoints.length >= 2), ALWAYS place the pin ON the walk's route segment for that street!
+  if (routePoints.length >= 2) {
+    const segments = buildRouteSegments(routePoints, waypointStreets);
+    if (segments.length > 0) {
+      const allStreets = [
+        ...Object.values(waypointStreets),
+        streetName,
+      ].filter(Boolean);
+      const matchedSeg = matchStreetToRouteSegment(
+        streetName,
+        segments,
+        allStreets
+      );
+      if (matchedSeg) {
+        // Count how many existing pins are already on this segment
+        const existingOnSeg = existingCoords.filter(
+          (c) => distancePointToSegmentMiles(c[0], c[1], matchedSeg) < 0.015
+        ).length;
+        const t =
+          existingOnSeg === 0
+            ? 0.5
+            : existingOnSeg === 1
+            ? 0.33
+            : existingOnSeg === 2
+            ? 0.67
+            : (existingOnSeg % 4) * 0.2 + 0.2;
+        const lat =
+          matchedSeg.start[0] + t * (matchedSeg.end[0] - matchedSeg.start[0]);
+        const lng =
+          matchedSeg.start[1] + t * (matchedSeg.end[1] - matchedSeg.start[1]);
+        return [Number(lat.toFixed(5)), Number(lng.toFixed(5))];
       }
     }
   }
 
-  // 2. Check the Chillicothe street dictionary
-  let baseCoord: [number, number] | undefined =
-    CHILLICOTHE_STREET_COORDS[key] ||
-    CHILLICOTHE_STREET_COORDS[keyWithoutDir];
-
-  if (!baseCoord) {
-    // Partial match against known Chillicothe street keys
-    for (const [dictKey, coord] of Object.entries(CHILLICOTHE_STREET_COORDS)) {
-      if (
-        (keyWithoutDir.length >= 3 && dictKey.includes(keyWithoutDir)) ||
-        (dictKey.length >= 4 && key.includes(dictKey))
-      ) {
-        baseCoord = coord;
-        break;
-      }
-    }
-  }
-
+  // PRIORITY 2: Standalone pin without a route — check Chillicothe dictionary
+  const baseCoord =
+    CHILLICOTHE_STREET_COORDS[key] || CHILLICOTHE_STREET_COORDS[core];
   if (baseCoord) {
-    // If the walk has route points and one of the route points is close to this street (within ~0.22 miles),
-    // snap near that route segment or blend so the pin sits naturally along the walked path on that street
-    if (routePoints.length > 0) {
-      let closestPt: [number, number] | null = null;
-      let minDist = Infinity;
-      for (const pt of routePoints) {
-        const d = calculateDistanceMiles(baseCoord[0], baseCoord[1], pt[0], pt[1]);
-        if (d < minDist) {
-          minDist = d;
-          closestPt = pt;
-        }
-      }
-      if (closestPt && minDist <= 0.14) {
-        return applyAntiStackOffset(closestPt, existingCoords);
-      }
-    }
     return applyAntiStackOffset(baseCoord, existingCoords);
   }
 
   return null;
 }
 
-// Forward-geocode any street name in Chillicothe, OH using OpenStreetMap Nominatim (with sync fallback)
 export async function forwardGeocodeStreetInChillicothe(
   streetName: string,
   routePoints: [number, number][] = [],
   waypointStreets: Record<number, string> = {},
   existingCoords: Array<[number, number]> = []
 ): Promise<[number, number] | null> {
-  // First check fast sync resolver (waypoint match + Chillicothe street dictionary)
+  // If we have a walk route, reverse-geocode any un-cached route segment midpoints first so segment street matching is 100% exact!
+  if (routePoints.length >= 2) {
+    const segments = buildRouteSegments(routePoints, waypointStreets);
+    for (const seg of segments) {
+      if (!seg.cachedCoreKey) {
+        const road = await reverseGeocodeStreet(seg.mid[0], seg.mid[1]);
+        if (road) {
+          saveSegmentStreetToCache(seg.mid[0], seg.mid[1], road);
+          waypointStreets[seg.index] = road;
+        }
+      }
+    }
+    const routeMatch = resolveStreetCoordinatesSync(
+      streetName,
+      routePoints,
+      waypointStreets,
+      existingCoords
+    );
+    if (routeMatch) return routeMatch;
+  }
+
   const syncMatch = resolveStreetCoordinatesSync(
     streetName,
     routePoints,
@@ -815,48 +1094,26 @@ export async function forwardGeocodeStreetInChillicothe(
         lon?: string;
       }>;
       if (Array.isArray(results) && results.length > 0) {
-        const candidates: [number, number][] = results
-          .map(
-            (r) =>
-              [Number(r.lat), Number(r.lon)] as [number, number]
-          )
-          .filter((c) => !Number.isNaN(c[0]) && !Number.isNaN(c[1]));
-
-        if (candidates.length > 0) {
-          // Pick candidate closest to the walk's route if routePoints exist
-          let best = candidates[0];
-          if (routePoints.length > 0) {
-            let bestDist = Infinity;
-            for (const cand of candidates) {
-              for (const rPt of routePoints) {
-                const d = calculateDistanceMiles(
-                  cand[0],
-                  cand[1],
-                  rPt[0],
-                  rPt[1]
-                );
-                if (d < bestDist) {
-                  bestDist = d;
-                  best = cand;
-                }
-              }
-            }
-          }
+        const first = results[0];
+        if (first.lat && first.lon) {
           return applyAntiStackOffset(
-            [Number(best[0].toFixed(5)), Number(best[1].toFixed(5))],
+            [
+              Number(Number(first.lat).toFixed(5)),
+              Number(Number(first.lon).toFixed(5)),
+            ],
             existingCoords
           );
         }
       }
     }
   } catch {
-    // ignore network error
+    // ignore
   }
 
   return null;
 }
 
-// Automatically unstack existing pins that were stacked at a single location when different streetNames were specified
+// Tie every walk pin directly to its indicated street segment ON the walk's route
 export function unstackAndResolvePins(
   walks: WalkSession[],
   pins: EncounterPin[]
@@ -866,66 +1123,124 @@ export function unstackAndResolvePins(
   const walksById = new Map<string, WalkSession>();
   (walks || []).forEach((w) => walksById.set(w.id, w));
 
-  // Count how many pins share each rounded coordinate
-  const coordCounts = new Map<string, number>();
-  pins.forEach((p) => {
-    const key = `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
-    coordCounts.set(key, (coordCounts.get(key) || 0) + 1);
-  });
+  // Helper to find the walk a pin belongs to (by walkId, or by matching date + street if standalone)
+  const findWalkForPin = (pin: EncounterPin): WalkSession | undefined => {
+    const direct = walksById.get(pin.walkId);
+    if (direct && direct.gpsPath && direct.gpsPath.length >= 2) return direct;
 
-  const placedCoords: Array<[number, number]> = [];
+    const pinDate = (pin.timestamp || '').slice(0, 10);
+    const pinCore = getCoreStreetName(pin.streetName);
+    // Match walk on same date
+    const sameDateWalk = (walks || []).find(
+      (w) => w.date === pinDate && w.gpsPath && w.gpsPath.length >= 2
+    );
+    if (sameDateWalk) return sameDateWalk;
+
+    // Or match walk that walked this street
+    if (pinCore) {
+      return (walks || []).find(
+        (w) =>
+          w.gpsPath &&
+          w.gpsPath.length >= 2 &&
+          w.streetsWalked.some((s) => getCoreStreetName(s) === pinCore)
+      );
+    }
+    return undefined;
+  };
+
+  // Group pins by walk so we can place each pin on its matched street segment along that walk's route
+  const pinToWalkMap = new Map<string, WalkSession>();
+  const pinsByWalkId = new Map<string, EncounterPin[]>();
+
+  for (const pin of pins) {
+    const walk = findWalkForPin(pin);
+    if (walk) {
+      pinToWalkMap.set(pin.id, walk);
+      const list = pinsByWalkId.get(walk.id) || [];
+      list.push(pin);
+      pinsByWalkId.set(walk.id, list);
+    }
+  }
+
+  const updatedPinCoords = new Map<string, [number, number]>();
+
+  for (const [walkId, walkPins] of pinsByWalkId.entries()) {
+    const walk = walksById.get(walkId);
+    if (!walk || !walk.gpsPath || walk.gpsPath.length < 2) continue;
+
+    const segments = buildRouteSegments(walk.gpsPath);
+    if (segments.length === 0) continue;
+
+    const allWalkStreets = [
+      ...(walk.streetsWalked || []),
+      ...walkPins.map((p) => p.streetName),
+    ].filter(Boolean);
+
+    // Assign each pin on this walk to its matching segment on walk.gpsPath
+    const pinsBySegmentIdx = new Map<number, EncounterPin[]>();
+    for (const pin of walkPins) {
+      const matchedSeg =
+        matchStreetToRouteSegment(pin.streetName, segments, allWalkStreets) ||
+        segments[0];
+      const segList = pinsBySegmentIdx.get(matchedSeg.index) || [];
+      segList.push(pin);
+      pinsBySegmentIdx.set(matchedSeg.index, segList);
+    }
+
+    // Interpolate each pin cleanly along its matched route segment
+    for (const [segIdx, segPins] of pinsBySegmentIdx.entries()) {
+      const seg = segments.find((s) => s.index === segIdx) || segments[0];
+      segPins.forEach((pin, idxOnSeg) => {
+        const pt = interpolatePointOnSegment(seg, idxOnSeg, segPins.length);
+        updatedPinCoords.set(pin.id, pt);
+      });
+    }
+  }
 
   return pins.map((pin) => {
-    const coordKey = `${pin.lat.toFixed(4)},${pin.lng.toFixed(4)}`;
-    const isStacked = (coordCounts.get(coordKey) || 0) > 1;
-    const walk = walksById.get(pin.walkId);
-    const routePts = walk?.gpsPath || [];
-
-    // Check if pin is sitting on the walk's start point or default center while specifying a known street
-    const isAtStartPoint =
-      walk?.startPoint &&
-      Math.abs(pin.lat - walk.startPoint.lat) < 0.0002 &&
-      Math.abs(pin.lng - walk.startPoint.lng) < 0.0002;
-
-    const resolvedForStreet = resolveStreetCoordinatesSync(
-      pin.streetName,
-      routePts,
-      {},
-      placedCoords
-    );
-
-    if (resolvedForStreet) {
-      const distFromResolved = calculateDistanceMiles(
-        pin.lat,
-        pin.lng,
-        resolvedForStreet[0],
-        resolvedForStreet[1]
-      );
-      // If pins were stacked together or placed > 0.08 miles away from the street named on the pin, move to the street!
-      if (isStacked || isAtStartPoint || distFromResolved > 0.08) {
-        placedCoords.push(resolvedForStreet);
-        return {
-          ...pin,
-          lat: resolvedForStreet[0],
-          lng: resolvedForStreet[1],
-        };
-      }
-    }
-
-    if (isStacked) {
-      const offsetCoord = applyAntiStackOffset(
-        [pin.lat, pin.lng],
-        placedCoords
-      );
-      placedCoords.push(offsetCoord);
+    const newCoord = updatedPinCoords.get(pin.id);
+    if (newCoord) {
       return {
         ...pin,
-        lat: offsetCoord[0],
-        lng: offsetCoord[1],
+        lat: newCoord[0],
+        lng: newCoord[1],
       };
     }
-
-    placedCoords.push([pin.lat, pin.lng]);
     return pin;
   });
+}
+
+// Async refinement: reverse-geocode any uncached route segment midpoints and snap pins to their exact street segments
+export async function refineWalkPinsWithRouteGeocoding(
+  state: AppDatabaseState
+): Promise<AppDatabaseState | null> {
+  let newlyGeocodedCount = 0;
+
+  for (const walk of state.walks || []) {
+    if (!walk.gpsPath || walk.gpsPath.length < 2) continue;
+    const segments = buildRouteSegments(walk.gpsPath);
+    for (const seg of segments) {
+      if (!seg.cachedCoreKey) {
+        const road = await reverseGeocodeStreet(seg.mid[0], seg.mid[1]);
+        if (road) {
+          saveSegmentStreetToCache(seg.mid[0], seg.mid[1], road);
+          newlyGeocodedCount++;
+        }
+      }
+    }
+  }
+
+  const snappedPins = unstackAndResolvePins(state.walks, state.pins);
+  const pinsChanged = snappedPins.some(
+    (p, idx) =>
+      p.lat !== state.pins[idx]?.lat || p.lng !== state.pins[idx]?.lng
+  );
+
+  if (newlyGeocodedCount > 0 || pinsChanged) {
+    return saveDatabase({
+      ...state,
+      pins: snappedPins,
+    });
+  }
+  return null;
 }

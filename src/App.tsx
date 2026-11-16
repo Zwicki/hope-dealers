@@ -10,6 +10,7 @@ import {
   loadCurrentSession,
   loadDatabase,
   pullFromRemoteCloud,
+  refineWalkPinsWithRouteGeocoding,
   saveCurrentSession,
   saveDatabase,
   SEED_PINS,
@@ -37,10 +38,13 @@ export function App() {
   );
   const [hasActiveWalkRunning, setHasActiveWalkRunning] = useState(false);
 
-  // Pull from cloud on startup, on window focus, and listen for online/offline/sync events
+  // Pull from cloud on startup, refine pin route-segment placement, and listen for online/offline/sync events
   useEffect(() => {
-    void pullFromRemoteCloud().then((remoteState) => {
-      if (remoteState) setDbState(remoteState);
+    void pullFromRemoteCloud().then(async (remoteState) => {
+      const base = remoteState || loadDatabase();
+      setDbState(base);
+      const refined = await refineWalkPinsWithRouteGeocoding(base);
+      if (refined) setDbState(refined);
     });
 
     const handleOnline = () => {

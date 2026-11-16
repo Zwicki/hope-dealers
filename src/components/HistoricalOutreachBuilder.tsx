@@ -46,6 +46,7 @@ import {
   forwardGeocodeStreetInChillicothe,
   resolveStreetCoordinatesSync,
   reverseGeocodeStreet,
+  saveSegmentStreetToCache,
 } from '../services/cloudSyncService';
 import {
   DateInputWithCalendar,
@@ -293,12 +294,25 @@ export const HistoricalOutreachBuilder: React.FC<
       setIsLoopClosed(false);
       recomputeRouteMiles(nextPts);
 
-      const detected = await reverseGeocodeStreet(lat, lng);
-      if (detected) {
-        setWaypointStreets((prev) => ({ ...prev, [wpIndex]: detected }));
-        setStreetsWalked((prev) =>
-          prev.includes(detected) ? prev : [...prev, detected]
-        );
+      if (wpIndex >= 1) {
+        const prevPt = routePoints[wpIndex - 1];
+        const midLat = (prevPt[0] + lat) / 2;
+        const midLng = (prevPt[1] + lng) / 2;
+        const segStreet = await reverseGeocodeStreet(midLat, midLng);
+        if (segStreet) {
+          saveSegmentStreetToCache(midLat, midLng, segStreet);
+          setWaypointStreets((prev) => ({ ...prev, [wpIndex - 1]: segStreet }));
+          setStreetsWalked((prev) =>
+            prev.includes(segStreet) ? prev : [...prev, segStreet]
+          );
+        }
+      } else {
+        const detected = await reverseGeocodeStreet(lat, lng);
+        if (detected) {
+          setStreetsWalked((prev) =>
+            prev.includes(detected) ? prev : [...prev, detected]
+          );
+        }
       }
     } else if (mapClickMode === 'interaction') {
       setInteractionSpots((prev) => [...prev, [lat, lng]]);
