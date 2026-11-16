@@ -52,7 +52,10 @@ interface CommunityImpactMapProps {
   onOpenLogin: () => void;
 }
 
-function createPinIcon(type: 'prayer' | 'service' | 'both') {
+function createPinIcon(
+  type: 'prayer' | 'service' | 'both',
+  peopleCount = 1
+) {
   const bg =
     type === 'both'
       ? 'linear-gradient(135deg, #f97316, #dc2626)'
@@ -61,10 +64,31 @@ function createPinIcon(type: 'prayer' | 'service' | 'both') {
       : 'linear-gradient(135deg, #10b981, #0284c7)';
 
   const symbol = type === 'both' ? '✨' : type === 'prayer' ? '🙏' : '🤝';
+  const countBadge =
+    peopleCount > 1
+      ? `<span style="
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 4px;
+          border-radius: 9999px;
+          background: #0f172a;
+          color: #fde047;
+          border: 1.5px solid #fde047;
+          font-size: 10px;
+          font-weight: 900;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">${peopleCount}</span>`
+      : '';
 
   return L.divIcon({
     className: 'custom-hope-pin',
     html: `<div style="
+      position: relative;
       width: 34px;
       height: 34px;
       border-radius: 9999px;
@@ -75,7 +99,7 @@ function createPinIcon(type: 'prayer' | 'service' | 'both') {
       align-items: center;
       justify-content: center;
       font-size: 16px;
-    ">${symbol}</div>`,
+    ">${symbol}${countBadge}</div>`,
     iconSize: [34, 34],
     iconAnchor: [17, 17],
     popupAnchor: [0, -16],
@@ -659,7 +683,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
             <Marker
               key={pin.id}
               position={[pin.lat, pin.lng]}
-              icon={createPinIcon(pin.type)}
+              icon={createPinIcon(pin.type, pin.peopleCount || 1)}
             >
               <Popup>
                 <div className="space-y-2 min-w-[220px] max-w-[270px]">
@@ -676,6 +700,12 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                     </span>
                   </div>
 
+                  {(pin.peopleCount || 1) > 1 && (
+                    <div className="inline-block px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-extrabold">
+                      👥 Prayed for {pin.peopleCount} People
+                    </div>
+                  )}
+
                   {/* Role-Based Name & Description */}
                   {currentUser ? (
                     <>
@@ -690,7 +720,9 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                   ) : (
                     <>
                       <div className="text-sm font-black text-white">
-                        Neighbor Prayed For & Supported
+                        {(pin.peopleCount || 1) > 1
+                          ? `${pin.peopleCount} Neighbors Prayed For & Supported`
+                          : 'Neighbor Prayed For & Supported'}
                       </div>
                       <p className="text-[11px] text-slate-400 italic">
                         First name & personal prayer request protected in Public View.
@@ -891,11 +923,20 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                   className="p-3 rounded-xl bg-slateDark-950 border border-slate-800 space-y-1.5"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-extrabold text-xs sm:text-sm text-white">
-                      {currentUser
-                        ? `🙏 ${pin.firstName}`
-                        : '🙏 Neighbor Prayed With'}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-extrabold text-xs sm:text-sm text-white">
+                        {currentUser
+                          ? `🙏 ${pin.firstName}`
+                          : (pin.peopleCount || 1) > 1
+                          ? `🙏 ${pin.peopleCount} Neighbors Prayed With`
+                          : '🙏 Neighbor Prayed With'}
+                      </span>
+                      {(pin.peopleCount || 1) > 1 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-extrabold">
+                          👥 {pin.peopleCount} People
+                        </span>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={() => setFocusedPath([[pin.lat, pin.lng]])}

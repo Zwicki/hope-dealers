@@ -7,10 +7,13 @@ import {
   MapPin,
   Mic,
   MicOff,
+  Minus,
   Navigation,
   PhoneCall,
+  Plus,
   Sparkles,
   User,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -47,6 +50,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
   onSavePin,
 }) => {
   const [firstName, setFirstName] = useState('');
+  const [peopleCount, setPeopleCount] = useState<number>(1);
   const [encounterType, setEncounterType] = useState<EncounterType>('both');
   const [selectedNeeds, setSelectedNeeds] = useState<NeedCategoryId[]>([]);
   const [description, setDescription] = useState('');
@@ -62,6 +66,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
 
     if (editingPin) {
       setFirstName(editingPin.firstName);
+      setPeopleCount(Math.max(1, editingPin.peopleCount || 1));
       setEncounterType(editingPin.type);
       setSelectedNeeds(editingPin.needCategories || []);
       setDescription(editingPin.description);
@@ -72,6 +77,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
     }
 
     setFirstName('');
+    setPeopleCount(1);
     setEncounterType('both');
     setSelectedNeeds([]);
     setDescription('');
@@ -191,12 +197,19 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanName = firstName.trim() || 'Community Friend';
+    const validCount = Math.max(1, peopleCount || 1);
+    const cleanName =
+      firstName.trim() ||
+      (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
     const cleanDesc =
       description.trim() ||
       (encounterType === 'prayer'
-        ? `Prayed with ${cleanName} on ${streetName || 'the street'}.`
-        : `Connected ${cleanName} with community resources and prayed together.`);
+        ? `Prayed with ${cleanName} (${validCount} ${
+            validCount === 1 ? 'person' : 'people'
+          }) on ${streetName || 'the street'}.`
+        : `Connected ${cleanName} (${validCount} ${
+            validCount === 1 ? 'person' : 'people'
+          }) with community resources and prayed together.`);
 
     const updatedTimestamp = editingPin
       ? `${pinDate}${editingPin.timestamp.slice(10)}`
@@ -210,6 +223,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       lng: coords[1],
       streetName: streetName.trim() || 'Chillicothe Outreach',
       firstName: cleanName,
+      peopleCount: validCount,
       description: cleanDesc,
       type: encounterType,
       needCategories: selectedNeeds,
@@ -324,19 +338,86 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             </div>
           </div>
 
-          {/* 2. First Name of Person & Date (when editing) */}
+          {/* 2. How Many People Were Prayed For / Helped Here? */}
+          <div className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-phoenix-400" />
+                <span>2. How Many People Prayed For / Helped Here?</span>
+              </label>
+              <span className="px-2.5 py-0.5 rounded-full bg-phoenix-500/20 border border-phoenix-500/40 text-phoenix-300 text-xs font-extrabold">
+                {peopleCount} {peopleCount === 1 ? 'Person' : 'People'}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[1, 2, 3, 4, 5].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setPeopleCount(num)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition ${
+                      peopleCount === num
+                        ? 'bg-phoenix-600 text-white border-phoenix-400 shadow'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {num === 1 ? '1 Person' : `${num} People`}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPeopleCount((c) => Math.max(1, c - 1))}
+                  className="w-8 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={peopleCount}
+                  onChange={(e) =>
+                    setPeopleCount(Math.max(1, parseInt(e.target.value) || 1))
+                  }
+                  className="w-14 py-1 text-center rounded-lg bg-slate-900 border border-slate-700 text-xs font-black text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPeopleCount((c) => c + 1)}
+                  className="w-8 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. First Name(s) of Person(s) & Date (when editing) */}
           <div className={editingPin ? 'grid grid-cols-1 sm:grid-cols-3 gap-3' : ''}>
             <div className={editingPin ? 'sm:col-span-2' : ''}>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  2. First Name of Person Prayed For
+                  {peopleCount > 1
+                    ? `3. First Names / Group (${peopleCount} People)`
+                    : '3. First Name of Person Prayed For'}
                 </label>
                 <button
                   type="button"
-                  onClick={() => setFirstName('Friend (Anonymous)')}
+                  onClick={() =>
+                    setFirstName(
+                      peopleCount > 1
+                        ? `Group of ${peopleCount} Friends`
+                        : 'Friend (Anonymous)'
+                    )
+                  }
                   className="text-[11px] font-semibold text-phoenix-400 hover:text-phoenix-300 underline"
                 >
-                  Tap if Anonymous
+                  {peopleCount > 1 ? 'Tap if Group / Anonymous' : 'Tap if Anonymous'}
                 </button>
               </div>
               <div className="relative">
@@ -346,7 +427,11 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
                   required
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Enter first name (e.g., Marcus, Tiffany...)"
+                  placeholder={
+                    peopleCount > 1
+                      ? `Enter names (e.g., Marcus & Sarah, or Group of ${peopleCount}...)`
+                      : 'Enter first name (e.g., Marcus, Tiffany...)'
+                  }
                   className="w-full pl-10 pr-4 py-3 rounded-xl bg-slateDark-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
                 />
               </div>

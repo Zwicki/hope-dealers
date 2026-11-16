@@ -90,6 +90,7 @@ export interface EncounterPin {
   lng: number;
   streetName: string;
   firstName: string;
+  peopleCount?: number; // Number of people prayed for / helped at this pin (default 1)
   description: string;
   type: EncounterType;
   needCategories: NeedCategoryId[];
@@ -113,6 +114,7 @@ export interface CommunityInteractionPoint {
   streetName?: string;
   timestamp: string;
   kind: 'interaction' | 'prayer' | 'service';
+  peopleCount?: number; // Number of people in this interaction / prayer (default 1)
 }
 
 export interface WalkSession {

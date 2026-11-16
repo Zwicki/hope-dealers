@@ -157,6 +157,7 @@ const MapClickCapture: React.FC<{
 interface DraftPrayerPin {
   id: string;
   firstName: string;
+  peopleCount: number;
   type: EncounterType;
   needCategories: NeedCategoryId[];
   description: string;
@@ -216,6 +217,7 @@ export const HistoricalOutreachBuilder: React.FC<
 
   // Draft Prayer / Service Pin Form inside Builder
   const [pinFirstName, setPinFirstName] = useState('');
+  const [pinPeopleCount, setPinPeopleCount] = useState<number>(1);
   const [pinType, setPinType] = useState<EncounterType>('both');
   const [pinNeeds, setPinNeeds] = useState<NeedCategoryId[]>([]);
   const [pinDescription, setPinDescription] = useState('');
@@ -348,16 +350,20 @@ export const HistoricalOutreachBuilder: React.FC<
   };
 
   const handleAddDraftPinToWalk = () => {
-    const cleanName = pinFirstName.trim() || 'Community Friend';
+    const validCount = Math.max(1, pinPeopleCount || 1);
+    const cleanName =
+      pinFirstName.trim() ||
+      (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
     const cleanDesc =
       pinDescription.trim() ||
-      `Prayed with ${cleanName} on ${
-        pinStreet || streetsWalked[0] || 'the street'
-      }.`;
+      `Prayed with ${cleanName} (${validCount} ${
+        validCount === 1 ? 'person' : 'people'
+      }) on ${pinStreet || streetsWalked[0] || 'the street'}.`;
 
     const newDraft: DraftPrayerPin = {
       id: `draft-pin-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
       firstName: cleanName,
+      peopleCount: validCount,
       type: pinType,
       needCategories: pinNeeds,
       description: cleanDesc,
@@ -367,14 +373,19 @@ export const HistoricalOutreachBuilder: React.FC<
     };
 
     const nextDrafts = [...draftPins, newDraft];
+    const totalDraftPeople = nextDrafts.reduce(
+      (sum, d) => sum + Math.max(1, d.peopleCount || 1),
+      0
+    );
     setDraftPins(nextDrafts);
-    setPrayersCount((c) => Math.max(c, nextDrafts.length));
-    setInteractionsCount((c) => Math.max(c, nextDrafts.length));
+    setPrayersCount((c) => Math.max(c + validCount, totalDraftPeople));
+    setInteractionsCount((c) => Math.max(c + validCount, totalDraftPeople));
     if (pinType === 'service' || pinType === 'both' || pinNeeds.length > 0) {
-      setServiceLinkagesCount((c) => c + 1);
+      setServiceLinkagesCount((c) => c + validCount);
     }
 
     setPinFirstName('');
+    setPinPeopleCount(1);
     setPinDescription('');
     setPinNeeds([]);
   };
@@ -421,15 +432,19 @@ export const HistoricalOutreachBuilder: React.FC<
     // Automatically include any typed person in the Prayer Pin inputs even if the user didn't click "Add Person to This Walk" first
     const allDraftPins: DraftPrayerPin[] = [...draftPins];
     if (pinFirstName.trim() || pinDescription.trim() || pinNeeds.length > 0) {
-      const cleanName = pinFirstName.trim() || 'Community Friend';
+      const validCount = Math.max(1, pinPeopleCount || 1);
+      const cleanName =
+        pinFirstName.trim() ||
+        (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
       const cleanDesc =
         pinDescription.trim() ||
-        `Prayed with ${cleanName} on ${
-          pinStreet || streetsWalked[0] || 'the street'
-        }.`;
+        `Prayed with ${cleanName} (${validCount} ${
+          validCount === 1 ? 'person' : 'people'
+        }) on ${pinStreet || streetsWalked[0] || 'the street'}.`;
       allDraftPins.push({
         id: `draft-pin-auto-${Date.now()}`,
         firstName: cleanName,
+        peopleCount: validCount,
         type: pinType,
         needCategories: pinNeeds,
         description: cleanDesc,
@@ -449,6 +464,7 @@ export const HistoricalOutreachBuilder: React.FC<
       lng: dp.lng,
       streetName: dp.streetName,
       firstName: dp.firstName,
+      peopleCount: Math.max(1, dp.peopleCount || 1),
       description: dp.description,
       type: dp.type,
       needCategories: dp.needCategories,
@@ -456,6 +472,11 @@ export const HistoricalOutreachBuilder: React.FC<
       groupMembers,
       syncStatus: navigator.onLine ? 'synced' : 'pending',
     }));
+
+    const totalPeopleFromPins = builtPins.reduce(
+      (sum, p) => sum + Math.max(1, p.peopleCount || 1),
+      0
+    );
 
     const builtInteractions: CommunityInteractionPoint[] = [
       ...interactionSpots.map((pt, idx) => ({
@@ -509,8 +530,8 @@ export const HistoricalOutreachBuilder: React.FC<
       },
       gpsPath: finalRoute,
       interactionLocations: builtInteractions,
-      interactionsCount,
-      prayersCount: Math.max(prayersCount, builtPins.length),
+      interactionsCount: Math.max(interactionsCount, totalPeopleFromPins),
+      prayersCount: Math.max(prayersCount, totalPeopleFromPins),
       serviceLinkagesCount,
       trashBagsCount,
       trashWeightLbs,
@@ -542,19 +563,31 @@ export const HistoricalOutreachBuilder: React.FC<
 
   const handleSaveSinglePastPin = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanName = pinFirstName.trim() || 'Community Friend';
+    const validCount = Math.max(1, pinPeopleCount || 1);
+    const cleanName =
+      pinFirstName.trim() ||
+      (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
     const cleanDesc =
       pinDescription.trim() ||
-      `Prayed with ${cleanName} on ${pinStreet || 'the street'}.`;
+      `Prayed with ${cleanName} (${validCount} ${
+        validCount === 1 ? 'person' : 'people'
+      }) on ${pinStreet || 'the street'}.`;
+
+    const normalizedPinDate =
+      parseFlexibleDateToIso(standalonePinDate) ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(standalonePinDate)
+        ? standalonePinDate
+        : new Date().toISOString().slice(0, 10));
 
     const pin: EncounterPin = {
       id: `pin-past-${Date.now()}`,
       walkId: 'walk-historical-standalone',
-      timestamp: `${standalonePinDate}T15:00:00.000Z`,
+      timestamp: `${normalizedPinDate}T15:00:00.000Z`,
       lat: pinCoords[0],
       lng: pinCoords[1],
       streetName: pinStreet.trim() || 'Paint St',
       firstName: cleanName,
+      peopleCount: validCount,
       description: cleanDesc,
       type: pinType,
       needCategories: pinNeeds,
@@ -565,12 +598,15 @@ export const HistoricalOutreachBuilder: React.FC<
 
     onSaveStandalonePin(pin);
     setPinFirstName('');
+    setPinPeopleCount(1);
     setPinDescription('');
     setPinNeeds([]);
     setSavedToast(
-      `Saved past prayer/service pin for ${cleanName} on ${pin.streetName} (${standalonePinDate})!`
+      `✅ Saved past prayer/service pin for ${cleanName} (${validCount} ${
+        validCount === 1 ? 'person' : 'people'
+      }) on ${pin.streetName} (${normalizedPinDate})!`
     );
-    setTimeout(() => setSavedToast(null), 5000);
+    setTimeout(() => setSavedToast(null), 8000);
   };
 
   // Intermediate waypoints (excluding start point, and excluding final point if loop is closed)
@@ -1130,14 +1166,30 @@ export const HistoricalOutreachBuilder: React.FC<
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <input
                 type="text"
                 value={pinFirstName}
                 onChange={(e) => setPinFirstName(e.target.value)}
-                placeholder="First Name (e.g., Marcus)"
+                placeholder="First Name(s) (e.g., Marcus)"
                 className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
               />
+
+              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5">
+                <span className="text-[11px] font-bold text-amber-300 shrink-0">
+                  👥 # People:
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={pinPeopleCount}
+                  onChange={(e) =>
+                    setPinPeopleCount(Math.max(1, parseInt(e.target.value) || 1))
+                  }
+                  className="w-full bg-transparent text-xs font-black text-white focus:outline-none text-center"
+                />
+              </div>
 
               <input
                 type="text"
@@ -1206,6 +1258,11 @@ export const HistoricalOutreachBuilder: React.FC<
                   >
                     <div>
                       <strong className="text-white">🙏 {dp.firstName}</strong>{' '}
+                      {(dp.peopleCount || 1) > 1 && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-[10px] mr-1">
+                          👥 {dp.peopleCount} People
+                        </span>
+                      )}
                       <span className="text-phoenix-300">
                         ({dp.streetName})
                       </span>{' '}
@@ -1286,7 +1343,7 @@ export const HistoricalOutreachBuilder: React.FC<
       ) : (
         /* Standalone Past Prayer / Service Pin Form */
         <form onSubmit={handleSaveSinglePastPin} noValidate className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <DateInputWithCalendar
               label="Date of Prayer / Encounter"
               required
@@ -1296,15 +1353,31 @@ export const HistoricalOutreachBuilder: React.FC<
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                First Name of Person
+                First Name(s) of Person(s)
               </label>
               <input
                 type="text"
                 required
                 value={pinFirstName}
                 onChange={(e) => setPinFirstName(e.target.value)}
-                placeholder="e.g., Marcus"
+                placeholder="e.g., Marcus & Sarah"
                 className="w-full px-3 py-2.5 rounded-xl bg-slateDark-950 border border-slate-700 text-xs text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-amber-300 mb-1">
+                How Many People Prayed For?
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={pinPeopleCount}
+                onChange={(e) =>
+                  setPinPeopleCount(Math.max(1, parseInt(e.target.value) || 1))
+                }
+                className="w-full px-3 py-2.5 rounded-xl bg-slateDark-950 border border-slate-700 text-xs font-black text-amber-300"
               />
             </div>
 

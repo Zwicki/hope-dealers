@@ -106,11 +106,23 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
     );
     const totalPrayers = Math.max(
       filteredWalks.reduce((sum, w) => sum + w.prayersCount, 0),
-      filteredPins.filter((p) => p.type === 'prayer' || p.type === 'both').length
+      filteredPins.reduce(
+        (sum, p) =>
+          p.type === 'prayer' || p.type === 'both'
+            ? sum + Math.max(1, p.peopleCount || 1)
+            : sum,
+        0
+      )
     );
     const totalServiceLinkages = Math.max(
       filteredWalks.reduce((sum, w) => sum + w.serviceLinkagesCount, 0),
-      filteredPins.filter((p) => p.type === 'service' || p.type === 'both').length
+      filteredPins.reduce(
+        (sum, p) =>
+          p.type === 'service' || p.type === 'both'
+            ? sum + Math.max(1, p.peopleCount || 1)
+            : sum,
+        0
+      )
     );
     const totalMiles = Number(
       filteredWalks.reduce((sum, w) => sum + w.milesWalked, 0).toFixed(1)
@@ -689,10 +701,17 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
                 className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-1.5"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-black text-white flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-phoenix-400" />
-                    <span>{pin.firstName}</span>
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-black text-white flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-phoenix-400" />
+                      <span>{pin.firstName}</span>
+                    </span>
+                    {(pin.peopleCount || 1) > 1 && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-extrabold">
+                        👥 {pin.peopleCount} People
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[11px] font-semibold text-phoenix-300">
                     📍 {pin.streetName} •{' '}
                     {new Date(pin.timestamp).toLocaleDateString()}

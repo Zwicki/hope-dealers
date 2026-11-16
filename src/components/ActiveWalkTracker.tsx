@@ -506,18 +506,20 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
     });
   };
 
-  // Log a Community Interaction with automatic GPS location capture
+  // Log a Community Interaction with automatic GPS location capture (supports 1 or multiple people)
   const handleRecordInteractionWithGps = (
-    kind: 'interaction' | 'prayer' | 'service'
+    kind: 'interaction' | 'prayer' | 'service',
+    peopleCount = 1
   ) => {
+    const validCount = Math.max(1, peopleCount);
     if (kind === 'interaction') {
-      setInteractionsCount((c) => c + 1);
+      setInteractionsCount((c) => c + validCount);
     } else if (kind === 'prayer') {
-      setPrayersCount((c) => c + 1);
-      setInteractionsCount((c) => c + 1);
+      setPrayersCount((c) => c + validCount);
+      setInteractionsCount((c) => c + validCount);
     } else if (kind === 'service') {
-      setServiceLinkagesCount((c) => c + 1);
-      setInteractionsCount((c) => c + 1);
+      setServiceLinkagesCount((c) => c + validCount);
+      setInteractionsCount((c) => c + validCount);
     }
 
     acquireCurrentGpsCoordinate((lat, lng, street) => {
@@ -529,6 +531,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         streetName: street || streetsWalked[streetsWalked.length - 1] || 'Paint St',
         timestamp: new Date().toISOString(),
         kind,
+        peopleCount: validCount,
       };
       setInteractionLocations((prev) => [...prev, point]);
 
@@ -594,18 +597,19 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
 
   const handlePinCreated = (pin: EncounterPin) => {
     const isEditing = Boolean(editingPin);
+    const count = Math.max(1, pin.peopleCount || 1);
     onSavePin(pin);
     if (!isEditing) {
-      setInteractionsCount((c) => c + 1);
+      setInteractionsCount((c) => c + count);
       if (pin.type === 'prayer' || pin.type === 'both') {
-        setPrayersCount((c) => c + 1);
+        setPrayersCount((c) => c + count);
       }
       if (
         pin.type === 'service' ||
         pin.type === 'both' ||
         pin.needCategories.length > 0
       ) {
-        setServiceLinkagesCount((c) => c + 1);
+        setServiceLinkagesCount((c) => c + count);
       }
       if (pin.streetName && !streetsWalked.includes(pin.streetName)) {
         setStreetsWalked((prev) => [...prev, pin.streetName]);
@@ -620,6 +624,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         streetName: pin.streetName,
         timestamp: pin.timestamp,
         kind: pin.type === 'service' ? 'service' : 'prayer',
+        peopleCount: count,
       };
       setInteractionLocations((prev) => [...prev, intPoint]);
       setGpsPath((prev) => {
@@ -641,8 +646,12 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
 
     setSavedBanner(
       isEditing
-        ? `Updated prayer record for ${pin.firstName}!`
-        : `Saved GPS pin for ${pin.firstName} on ${pin.streetName}!`
+        ? `Updated prayer record for ${pin.firstName} (${count} ${
+            count === 1 ? 'person' : 'people'
+          })!`
+        : `Saved GPS pin for ${pin.firstName} (${count} ${
+            count === 1 ? 'person' : 'people'
+          }) on ${pin.streetName}!`
     );
     setTimeout(() => setSavedBanner(null), 4500);
   };
@@ -1177,72 +1186,116 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         </button>
       </section>
 
-      {/* STEP 3: 4 GIANT THUMB-FRIENDLY LIVE COUNTERS (Automatically Stamp GPS on +1) */}
+      {/* STEP 3: 4 GIANT THUMB-FRIENDLY LIVE COUNTERS (Supports 1 or Multiple People + Stamps GPS) */}
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         {/* Counter 1: Public Interactions */}
-        <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 flex items-center justify-between gap-3 shadow-lg">
-          <div>
-            <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-blue-400">
-              👋 Public Interactions
-            </span>
-            <div className="text-3xl font-black text-white mt-0.5">
-              {interactionsCount}
+        <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-blue-400">
+                👋 Public Interactions
+              </span>
+              <div className="text-3xl font-black text-white mt-0.5">
+                {interactionsCount}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Tap +1 or choose multiple people below (stamps GPS)
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400">
-              +1 automatically logs GPS interaction spot
-            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setInteractionsCount((c) => Math.max(0, c - 1));
+                  setInteractionLocations((prev) => prev.slice(0, -1));
+                }}
+                className="w-12 h-12 rounded-xl bg-slateDark-950 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition"
+              >
+                <Minus className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRecordInteractionWithGps('interaction', 1)}
+                className="w-16 h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-lg flex items-center justify-center gap-1 shadow-lg shadow-blue-600/30 active:scale-95 transition"
+              >
+                <Plus className="w-5 h-5" />
+                <span>1</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setInteractionsCount((c) => Math.max(0, c - 1));
-                setInteractionLocations((prev) => prev.slice(0, -1));
-              }}
-              className="w-12 h-12 rounded-xl bg-slateDark-950 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition"
-            >
-              <Minus className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRecordInteractionWithGps('interaction')}
-              className="w-16 h-14 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-lg flex items-center justify-center gap-1 shadow-lg shadow-blue-600/30 active:scale-95 transition"
-            >
-              <Plus className="w-5 h-5" />
-              <span>1</span>
-            </button>
+
+          {/* Multi-Person Quick-Add Row for Interactions */}
+          <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Multiple People:
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() =>
+                    handleRecordInteractionWithGps('interaction', num)
+                  }
+                  className="px-2.5 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 text-xs font-extrabold transition active:scale-95"
+                >
+                  +{num} People
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         {/* Counter 2: People Prayed For */}
-        <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 flex items-center justify-between gap-3 shadow-lg">
-          <div>
-            <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-amber-400">
-              🙏 People Prayed For
-            </span>
-            <div className="text-3xl font-black text-white mt-0.5">
-              {prayersCount}
+        <div className="p-4 rounded-2xl bg-slateDark-900 border border-slate-800 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider text-amber-400">
+                🙏 People Prayed For
+              </span>
+              <div className="text-3xl font-black text-white mt-0.5">
+                {prayersCount}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Tap +1 or multiple people below (or use Prayer Pin button)
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Tap +1 or use Prayer Pin button above
-            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPrayersCount((c) => Math.max(0, c - 1))}
+                className="w-12 h-12 rounded-xl bg-slateDark-950 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition"
+              >
+                <Minus className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRecordInteractionWithGps('prayer', 1)}
+                className="w-16 h-14 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slateDark-950 font-black text-lg flex items-center justify-center gap-1 shadow-lg shadow-amber-500/30 active:scale-95 transition"
+              >
+                <Plus className="w-5 h-5" />
+                <span>1</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPrayersCount((c) => Math.max(0, c - 1))}
-              className="w-12 h-12 rounded-xl bg-slateDark-950 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition"
-            >
-              <Minus className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRecordInteractionWithGps('prayer')}
-              className="w-16 h-14 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slateDark-950 font-black text-lg flex items-center justify-center gap-1 shadow-lg shadow-amber-500/30 active:scale-95 transition"
-            >
-              <Plus className="w-5 h-5" />
-              <span>1</span>
-            </button>
+
+          {/* Multi-Person Quick-Add Row for Prayers */}
+          <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Prayed for Multiple:
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => handleRecordInteractionWithGps('prayer', num)}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-extrabold transition active:scale-95"
+                >
+                  +{num} Prayed
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1444,10 +1497,15 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
                 className="p-3 rounded-xl bg-slateDark-950 border border-slate-800 flex items-start justify-between gap-3"
               >
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-extrabold text-sm text-white">
                       {pin.firstName}
                     </span>
+                    {(pin.peopleCount || 1) > 1 && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 font-extrabold">
+                        👥 {pin.peopleCount} People
+                      </span>
+                    )}
                     <span className="text-[11px] px-2 py-0.5 rounded-md bg-phoenix-500/20 text-phoenix-300 font-semibold">
                       📍 {pin.streetName} ({pin.lat.toFixed(4)}, {pin.lng.toFixed(4)})
                     </span>
