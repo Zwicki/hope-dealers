@@ -34,6 +34,7 @@ import {
   UserAccount,
   WalkSession,
 } from '../types/hopeDealers';
+import { calculateDistanceMiles } from '../services/cloudSyncService';
 import { EncounterPinModal } from './EncounterPinModal';
 import { EditWalkModal } from './EditWalkModal';
 
@@ -305,6 +306,135 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
     setIsPinModalOpen(true);
   };
 
+  const recalcPathMiles = (pts: [number, number][]): number => {
+    if (pts.length < 2) return 0;
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      total += calculateDistanceMiles(
+        pts[i - 1][0],
+        pts[i - 1][1],
+        pts[i][0],
+        pts[i][1]
+      );
+    }
+    return Number(total.toFixed(2));
+  };
+
+  // Super User: Delete a single waypoint (index in walk.gpsPath) from a saved walk
+  const handleDeleteWaypointFromWalk = (
+    walk: WalkSession,
+    pathIndex: number
+  ) => {
+    if (!onSaveWalk) return;
+    const currentPath = walk.gpsPath || [];
+    const nextPath = currentPath.filter((_, idx) => idx !== pathIndex);
+    const nextMiles = recalcPathMiles(nextPath);
+    const updated: WalkSession = {
+      ...walk,
+      gpsPath: nextPath,
+      milesWalked: nextMiles,
+      startPoint:
+        nextPath.length > 0
+          ? {
+              lat: nextPath[0][0],
+              lng: nextPath[0][1],
+              streetName:
+                walk.startPoint?.streetName ||
+                walk.streetsWalked[0] ||
+                'Start Point',
+              timestamp: walk.startTime,
+            }
+          : undefined,
+      endPoint:
+        nextPath.length > 0
+          ? {
+              lat: nextPath[nextPath.length - 1][0],
+              lng: nextPath[nextPath.length - 1][1],
+              streetName:
+                walk.endPoint?.streetName ||
+                walk.streetsWalked[walk.streetsWalked.length - 1] ||
+                'End Point',
+              timestamp: walk.endTime || new Date().toISOString(),
+            }
+          : undefined,
+    };
+    onSaveWalk(updated);
+  };
+
+  // Super User: Drag/Move a single waypoint on a saved walk route
+  const handleMoveWaypointInWalk = (
+    walk: WalkSession,
+    pathIndex: number,
+    newLat: number,
+    newLng: number
+  ) => {
+    if (!onSaveWalk) return;
+    const cleanLat = Number(newLat.toFixed(5));
+    const cleanLng = Number(newLng.toFixed(5));
+    const currentPath = walk.gpsPath || [];
+    const wasClosedLoop =
+      currentPath.length >= 3 &&
+      Math.abs(currentPath[0][0] - currentPath[currentPath.length - 1][0]) <
+        0.0001 &&
+      Math.abs(currentPath[0][1] - currentPath[currentPath.length - 1][1]) <
+        0.0001;
+
+    const nextPath = currentPath.map((pt, idx) => {
+      if (idx === pathIndex) return [cleanLat, cleanLng] as [number, number];
+      if (
+        pathIndex === 0 &&
+        wasClosedLoop &&
+        idx === currentPath.length - 1
+      ) {
+        return [cleanLat, cleanLng] as [number, number];
+      }
+      return pt;
+    });
+
+    const nextMiles = recalcPathMiles(nextPath);
+    const updated: WalkSession = {
+      ...walk,
+      gpsPath: nextPath,
+      milesWalked: nextMiles,
+      startPoint:
+        nextPath.length > 0
+          ? {
+              lat: nextPath[0][0],
+              lng: nextPath[0][1],
+              streetName:
+                walk.startPoint?.streetName ||
+                walk.streetsWalked[0] ||
+                'Start Point',
+              timestamp: walk.startTime,
+            }
+          : undefined,
+      endPoint:
+        nextPath.length > 0
+          ? {
+              lat: nextPath[nextPath.length - 1][0],
+              lng: nextPath[nextPath.length - 1][1],
+              streetName:
+                walk.endPoint?.streetName ||
+                walk.streetsWalked[walk.streetsWalked.length - 1] ||
+                'End Point',
+              timestamp: walk.endTime || new Date().toISOString(),
+            }
+          : undefined,
+    };
+    onSaveWalk(updated);
+  };
+
+  // Super User: Delete/Clear the GPS route path from a walk
+  const handleClearRouteFromWalk = (walk: WalkSession) => {
+    if (!onSaveWalk) return;
+    onSaveWalk({
+      ...walk,
+      gpsPath: [],
+      startPoint: undefined,
+      endPoint: undefined,
+    });
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 py-5 pb-28 space-y-4">
       {/* Top Map Header & Privacy Banner */}
@@ -568,6 +698,41 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                           🗑️ {walk.trashBagsCount} Bags ({walk.trashWeightLbs} lbs)
                         </span>
                       </div>
+
+                      {currentUser?.role === 'superuser' && (
+                        <div className="pt-2 border-t border-slate-700 flex flex-wrap items-center gap-1.5">
+                          {onSaveWalk && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingWalk(walk)}
+                              className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold inline-flex items-center gap-1"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Edit Route / Walk</span>
+                            </button>
+                          )}
+                          {onSaveWalk && (
+                            <button
+                              type="button"
+                              onClick={() => handleClearRouteFromWalk(walk)}
+                              className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[11px] font-bold inline-flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Delete Route</span>
+                            </button>
+                          )}
+                          {onDeleteWalk && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteWalk(walk.id)}
+                              className="px-2 py-1 rounded bg-slate-800 hover:bg-rose-500/30 text-slate-300 hover:text-rose-200 text-[11px] font-bold inline-flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Delete Walk</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </Popup>
                 </Polyline>
@@ -589,13 +754,26 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                   : null);
 
               const waypoints = (walk.gpsPath || []).slice(1);
+              const isSuper = currentUser?.role === 'superuser';
 
               return (
                 <React.Fragment key={`route-pts-${walk.id}`}>
                   {sp && (
-                    <Marker position={[sp.lat, sp.lng]} icon={startFlagIcon}>
+                    <Marker
+                      position={[sp.lat, sp.lng]}
+                      icon={startFlagIcon}
+                      draggable={Boolean(isSuper && onSaveWalk)}
+                      eventHandlers={{
+                        dragend: (e) => {
+                          if (isSuper && onSaveWalk) {
+                            const pos = e.target.getLatLng();
+                            handleMoveWaypointInWalk(walk, 0, pos.lat, pos.lng);
+                          }
+                        },
+                      }}
+                    >
                       <Popup>
-                        <div className="space-y-1 min-w-[190px]">
+                        <div className="space-y-1.5 min-w-[200px]">
                           <div className="text-xs font-extrabold text-emerald-400">
                             🏁 Walk Starting Point
                           </div>
@@ -608,12 +786,38 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                           <div className="text-[11px] text-amber-300">
                             👥 {walk.groupMembers.join(', ')}
                           </div>
+                          {isSuper && onSaveWalk && (
+                            <div className="pt-1.5 border-t border-slate-700 space-y-1">
+                              <div className="text-[10px] text-slate-400">
+                                💡 Drag marker on map to move start point
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleDeleteWaypointFromWalk(walk, 0)
+                                  }
+                                  className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[10px] font-bold"
+                                >
+                                  🗑️ Delete Start Point
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingWalk(walk)}
+                                  className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold"
+                                >
+                                  ✏️ Edit Route
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </Popup>
                     </Marker>
                   )}
 
                   {waypoints.map((pt, idx) => {
+                    const actualPathIndex = idx + 1;
                     // Don't overlap start flag if last waypoint returned to exact start point
                     if (
                       sp &&
@@ -625,19 +829,73 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                     }
                     return (
                       <Marker
-                        key={`wp-${walk.id}-${idx}`}
+                        key={`wp-${walk.id}-${actualPathIndex}-${pt[0]}-${pt[1]}`}
                         position={pt}
-                        icon={createRouteWaypointIcon(idx + 1)}
+                        icon={createRouteWaypointIcon(actualPathIndex)}
+                        draggable={Boolean(isSuper && onSaveWalk)}
+                        eventHandlers={{
+                          dragend: (e) => {
+                            if (isSuper && onSaveWalk) {
+                              const pos = e.target.getLatLng();
+                              handleMoveWaypointInWalk(
+                                walk,
+                                actualPathIndex,
+                                pos.lat,
+                                pos.lng
+                              );
+                            }
+                          },
+                        }}
                       >
                         <Popup>
-                          <div className="text-xs space-y-1">
+                          <div className="text-xs space-y-1.5 min-w-[200px]">
                             <strong className="text-phoenix-400 block">
-                              📍 Route Waypoint #{idx + 1}
+                              📍 Route Waypoint #{actualPathIndex}
                             </strong>
-                            <div>📅 {walk.date}</div>
+                            <div>
+                              📅 {walk.date} • ({pt[0].toFixed(4)},{' '}
+                              {pt[1].toFixed(4)})
+                            </div>
                             <div className="text-[11px] text-slate-300">
                               Streets: {walk.streetsWalked.join(', ')}
                             </div>
+                            {isSuper && onSaveWalk && (
+                              <div className="pt-1.5 border-t border-slate-700 space-y-1">
+                                <div className="text-[10px] text-slate-400">
+                                  💡 Drag this waypoint on the map to move it
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleDeleteWaypointFromWalk(
+                                        walk,
+                                        actualPathIndex
+                                      )
+                                    }
+                                    className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[10px] font-bold"
+                                  >
+                                    🗑️ Delete Waypoint #{actualPathIndex}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingWalk(walk)}
+                                    className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold"
+                                  >
+                                    ✏️ Edit Route
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleClearRouteFromWalk(walk)
+                                    }
+                                    className="px-2 py-1 rounded bg-slate-800 hover:bg-rose-500/30 text-slate-300 hover:text-rose-200 text-[10px] font-bold"
+                                  >
+                                    🗑️ Clear Route
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </Popup>
                       </Marker>
@@ -1025,6 +1283,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
           onAddNewPerson={onAddNewPerson}
           lbsPerTrashBag={lbsPerTrashBag}
           onSaveWalk={onSaveWalk}
+          onDeleteWalk={onDeleteWalk}
         />
       )}
     </div>

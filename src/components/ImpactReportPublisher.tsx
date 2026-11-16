@@ -777,6 +777,7 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
           lbsPerTrashBag={lbsPerTrashBag}
           onClose={() => setEditingWalk(null)}
           onSaveWalk={onSaveWalk}
+          onDeleteWalk={onDeleteWalk}
         />
       )}
     </div>

@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Route,
   Save,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -46,6 +47,7 @@ interface EditWalkModalProps {
   lbsPerTrashBag: number;
   onClose: () => void;
   onSaveWalk: (updatedWalk: WalkSession) => void;
+  onDeleteWalk?: (walkId: string) => void;
 }
 
 const startFinishIcon = L.divIcon({
@@ -110,6 +112,7 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
   lbsPerTrashBag,
   onClose,
   onSaveWalk,
+  onDeleteWalk,
 }) => {
   const [date, setDate] = useState('');
   const [durationMinutes, setDurationMinutes] = useState(60);
@@ -145,7 +148,10 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
   if (!isOpen || !walk) return null;
 
   const recomputeRouteMiles = (pts: [number, number][]) => {
-    if (pts.length < 2) return;
+    if (pts.length < 2) {
+      setMilesWalked(0);
+      return;
+    }
     let total = 0;
     for (let i = 1; i < pts.length; i++) {
       total += calculateDistanceMiles(
@@ -155,9 +161,31 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
         pts[i][1]
       );
     }
-    if (total > 0) {
-      setMilesWalked(Number(total.toFixed(2)));
-    }
+    setMilesWalked(Number(total.toFixed(2)));
+  };
+
+  const handleDeleteWaypoint = (indexToRemove: number) => {
+    setRoutePoints((prev) => {
+      const next = prev.filter((_, idx) => idx !== indexToRemove);
+      recomputeRouteMiles(next);
+      return next;
+    });
+  };
+
+  const handleMoveWaypoint = (
+    indexToMove: number,
+    newLat: number,
+    newLng: number
+  ) => {
+    const cleanLat = Number(newLat.toFixed(5));
+    const cleanLng = Number(newLng.toFixed(5));
+    setRoutePoints((prev) => {
+      const next = prev.map((pt, idx) =>
+        idx === indexToMove ? ([cleanLat, cleanLng] as [number, number]) : pt
+      );
+      recomputeRouteMiles(next);
+      return next;
+    });
   };
 
   const handleMapClick = async (lat: number, lng: number) => {
@@ -209,8 +237,7 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
     e.preventDefault();
     const groupSize = Math.max(1, groupMembers.length);
     const volHours = Number(((durationMinutes / 60) * groupSize).toFixed(2));
-    const finalRoute =
-      routePoints.length >= 2 ? routePoints : walk.gpsPath || [CHILLICOTHE_CENTER];
+    const finalRoute = routePoints;
 
     const updated: WalkSession = {
       ...walk,
@@ -227,10 +254,13 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
           ? {
               lat: finalRoute[0][0],
               lng: finalRoute[0][1],
-              streetName: streetsWalked[0] || walk.startPoint?.streetName || 'Start Point',
+              streetName:
+                streetsWalked[0] ||
+                walk.startPoint?.streetName ||
+                'Start Point',
               timestamp: walk.startTime,
             }
-          : walk.startPoint,
+          : undefined,
       endPoint:
         finalRoute.length > 0
           ? {
@@ -242,7 +272,7 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 'End Point',
               timestamp: walk.endTime || new Date().toISOString(),
             }
-          : walk.endPoint,
+          : undefined,
       gpsPath: finalRoute,
       interactionsCount,
       prayersCount,
@@ -509,16 +539,20 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
           </div>
 
           {/* Interactive Route Waypoint Editor */}
-          <div className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-2.5">
+          <div className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <Flag className="w-4 h-4 text-emerald-400" />
-                <span>
-                  Edit Walk Route on Map ({routePoints.length} points) — Click map
-                  to add points
+              <div>
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Flag className="w-4 h-4 text-emerald-400" />
+                  <span>
+                    Edit Walk Route & Waypoints ({routePoints.length} points)
+                  </span>
                 </span>
-              </span>
-              <div className="flex items-center gap-1.5">
+                <p className="text-[11px] text-slate-400">
+                  Drag any marker on the map to move it, click a waypoint to delete it, or click the map to add new points
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   disabled={routePoints.length < 2}
@@ -535,20 +569,24 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-[11px] font-bold inline-flex items-center gap-1"
                 >
                   <CornerUpLeft className="w-3 h-3" />
-                  <span>Undo Point</span>
+                  <span>Undo Last</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRoutePoints([])}
-                  className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[11px] font-bold inline-flex items-center gap-1"
+                  disabled={routePoints.length === 0}
+                  onClick={() => {
+                    setRoutePoints([]);
+                    setMilesWalked(0);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 disabled:opacity-40 text-rose-300 border border-rose-500/30 text-[11px] font-bold inline-flex items-center gap-1"
                 >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Clear Route</span>
+                  <Trash2 className="w-3 h-3" />
+                  <span>Delete Route</span>
                 </button>
               </div>
             </div>
 
-            <div className="rounded-xl overflow-hidden border border-slate-800 h-56">
+            <div className="rounded-xl overflow-hidden border border-slate-800 h-64">
               <MapContainer
                 center={mapCenter}
                 zoom={15}
@@ -562,20 +600,79 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 <MapClickCapture onMapClick={handleMapClick} />
 
                 {routePoints.length > 0 && (
-                  <Marker position={routePoints[0]} icon={startFinishIcon}>
-                    <Popup>🏁 Starting Point</Popup>
+                  <Marker
+                    position={routePoints[0]}
+                    icon={startFinishIcon}
+                    draggable={true}
+                    eventHandlers={{
+                      dragend: (e) => {
+                        const pos = e.target.getLatLng();
+                        handleMoveWaypoint(0, pos.lat, pos.lng);
+                      },
+                    }}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1.5 min-w-[160px]">
+                        <strong className="text-emerald-400 block">
+                          🏁 Starting Point
+                        </strong>
+                        <div className="text-[10px] text-slate-300">
+                          {routePoints[0][0].toFixed(4)},{' '}
+                          {routePoints[0][1].toFixed(4)}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          Drag marker to move start point
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWaypoint(0)}
+                          className="w-full px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-[11px]"
+                        >
+                          🗑️ Delete Start Point
+                        </button>
+                      </div>
+                    </Popup>
                   </Marker>
                 )}
 
-                {routePoints.slice(1).map((pt, idx) => (
-                  <Marker
-                    key={`edit-wp-${idx}`}
-                    position={pt}
-                    icon={createWaypointIcon(idx + 1)}
-                  >
-                    <Popup>📍 Waypoint #{idx + 1}</Popup>
-                  </Marker>
-                ))}
+                {routePoints.slice(1).map((pt, idx) => {
+                  const actualIndex = idx + 1;
+                  return (
+                    <Marker
+                      key={`edit-wp-${actualIndex}-${pt[0]}-${pt[1]}`}
+                      position={pt}
+                      icon={createWaypointIcon(actualIndex)}
+                      draggable={true}
+                      eventHandlers={{
+                        dragend: (e) => {
+                          const pos = e.target.getLatLng();
+                          handleMoveWaypoint(actualIndex, pos.lat, pos.lng);
+                        },
+                      }}
+                    >
+                      <Popup>
+                        <div className="text-xs space-y-1.5 min-w-[160px]">
+                          <strong className="text-phoenix-400 block">
+                            📍 Waypoint #{actualIndex}
+                          </strong>
+                          <div className="text-[10px] text-slate-300">
+                            {pt[0].toFixed(4)}, {pt[1].toFixed(4)}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            Drag marker to move waypoint
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteWaypoint(actualIndex)}
+                            className="w-full px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-[11px]"
+                          >
+                            🗑️ Delete Waypoint #{actualIndex}
+                          </button>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
 
                 {routePoints.length >= 2 && (
                   <Polyline
@@ -585,6 +682,44 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 )}
               </MapContainer>
             </div>
+
+            {/* Individual Waypoint Badges List (Click X to Delete Any Specific Waypoint) */}
+            {routePoints.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <div className="text-[11px] font-bold text-slate-400">
+                  Waypoints on Route (Click × on any waypoint to delete it, or drag it on the map above):
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                  {routePoints.map((pt, idx) => (
+                    <span
+                      key={`wp-pill-${idx}`}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                        idx === 0
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                          : 'bg-slate-900 border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      <span>
+                        {idx === 0 ? '🏁 Start' : `#${idx}`} ({pt[0].toFixed(4)},{' '}
+                        {pt[1].toFixed(4)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWaypoint(idx)}
+                        className="text-slate-400 hover:text-rose-400 ml-0.5"
+                        title={
+                          idx === 0
+                            ? 'Delete Start Point'
+                            : `Delete Waypoint #${idx}`
+                        }
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Walk Notes */}
@@ -600,13 +735,28 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
             />
           </div>
 
-          <button
-            type="submit"
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-phoenix-500 via-phoenix-600 to-phoenix-red hover:from-phoenix-600 hover:to-phoenix-700 text-white font-black text-sm sm:text-base shadow-xl flex items-center justify-center gap-2 transition"
-          >
-            <Save className="w-5 h-5" />
-            <span>Save Changes to Outreach Walk</span>
-          </button>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            {onDeleteWalk && (
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteWalk(walk.id);
+                  onClose();
+                }}
+                className="px-4 py-3.5 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete Entire Walk</span>
+              </button>
+            )}
+            <button
+              type="submit"
+              className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-phoenix-500 via-phoenix-600 to-phoenix-red hover:from-phoenix-600 hover:to-phoenix-700 text-white font-black text-sm sm:text-base shadow-xl flex items-center justify-center gap-2 transition"
+            >
+              <Save className="w-5 h-5" />
+              <span>Save Changes to Outreach Walk & Route</span>
+            </button>
+          </div>
         </form>
       </div>
     </div>
