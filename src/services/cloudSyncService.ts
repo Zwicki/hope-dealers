@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   AppDatabaseState,
+  CHILLICOTHE_CENTER,
   CloudConfig,
   CommunityInteractionPoint,
   EncounterPin,
@@ -1134,137 +1135,73 @@ export async function forwardGeocodeStreetInChillicothe(
   return null;
 }
 
-// Tie every walk pin directly to its indicated street segment ON the walk's route
+// Allow pins to be freely positioned anywhere without locking them to a route.
+// If multiple pins share the exact same identical GPS point, gently fans them out
+// so they do not stack invisibly on top of one another.
 export function unstackAndResolvePins(
-  walks: WalkSession[],
+  _walks: WalkSession[],
   pins: EncounterPin[]
 ): EncounterPin[] {
   if (!pins || pins.length === 0) return [];
 
-  const walksById = new Map<string, WalkSession>();
-  (walks || []).forEach((w) => walksById.set(w.id, w));
-
-  // Helper to find the walk a pin belongs to (by walkId, date, street, or closest route)
-  const walksWithRoutes = (walks || []).filter(
-    (w) => w.gpsPath && w.gpsPath.length >= 2
-  );
-
-  const findWalkForPin = (pin: EncounterPin): WalkSession | undefined => {
-    const direct = walksById.get(pin.walkId);
-    if (direct && direct.gpsPath && direct.gpsPath.length >= 2) return direct;
-
-    const pinDate = (pin.timestamp || '').slice(0, 10);
-    const pinCore = getCoreStreetName(pin.streetName);
-
-    // 1. Match walk on same date
-    const sameDateWalk = walksWithRoutes.find((w) => w.date === pinDate);
-    if (sameDateWalk) return sameDateWalk;
-
-    // 2. Match walk that explicitly lists this street in streetsWalked or cached segment streets
-    if (pinCore) {
-      const streetMatchWalk = walksWithRoutes.find((w) => {
-        if (w.streetsWalked.some((s) => getCoreStreetName(s) === pinCore)) {
-          return true;
-        }
-        const segs = buildRouteSegments(w.gpsPath);
-        return segs.some((s) => s.cachedCoreKey === pinCore);
-      });
-      if (streetMatchWalk) return streetMatchWalk;
-
-      // If pin is on 2nd, Main, or McArthur, prefer the northern route loop if one exists
-      if (['2nd', 'second', 'main', 'mcarthur', 'macarthur'].includes(pinCore)) {
-        const sortedByNorth = [...walksWithRoutes].sort(
-          (a, b) => b.gpsPath[0][0] - a.gpsPath[0][0]
-        );
-        if (sortedByNorth.length > 0) return sortedByNorth[0];
-      }
-    }
-
-    // 3. Fallback: closest walk route in walksWithRoutes
-    if (walksWithRoutes.length > 0) {
-      let bestWalk = walksWithRoutes[0];
-      let bestDist = Infinity;
-      for (const w of walksWithRoutes) {
-        for (const pt of w.gpsPath) {
-          const d = calculateDistanceMiles(pin.lat, pin.lng, pt[0], pt[1]);
-          if (d < bestDist) {
-            bestDist = d;
-            bestWalk = w;
-          }
-        }
-      }
-      return bestWalk;
-    }
-
-    return undefined;
-  };
-
-  // Group pins by walk so we can place each pin on its matched street segment along that walk's route
-  const pinToWalkMap = new Map<string, WalkSession>();
-  const pinsByWalkId = new Map<string, EncounterPin[]>();
+  // Group pins with virtually identical coordinates (~5 meters)
+  const clusters = new Map<string, EncounterPin[]>();
 
   for (const pin of pins) {
-    const walk = findWalkForPin(pin);
-    if (walk) {
-      pinToWalkMap.set(pin.id, walk);
-      const list = pinsByWalkId.get(walk.id) || [];
-      list.push(pin);
-      pinsByWalkId.set(walk.id, list);
+    let lat = Number(pin.lat);
+    let lng = Number(pin.lng);
+
+    if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) {
+      const resolved = resolveStreetCoordinatesSync(pin.streetName);
+      if (resolved) {
+        lat = resolved[0];
+        lng = resolved[1];
+      } else {
+        lat = CHILLICOTHE_CENTER[0];
+        lng = CHILLICOTHE_CENTER[1];
+      }
     }
+
+    // Cluster key for identical points
+    const key = `${lat.toFixed(4)}_${lng.toFixed(4)}`;
+    const list = clusters.get(key) || [];
+    list.push({ ...pin, lat, lng });
+    clusters.set(key, list);
   }
 
-  const updatedPinCoords = new Map<string, [number, number]>();
+  const result: EncounterPin[] = [];
 
-  for (const [walkId, walkPins] of pinsByWalkId.entries()) {
-    const walk = walksById.get(walkId);
-    if (!walk || !walk.gpsPath || walk.gpsPath.length < 2) continue;
-
-    const segments = buildRouteSegments(walk.gpsPath);
-    if (segments.length === 0) continue;
-
-    const allWalkStreets = [
-      ...(walk.streetsWalked || []),
-      ...walkPins.map((p) => p.streetName),
-    ].filter(Boolean);
-
-    // Assign each pin on this walk to its matching segment on walk.gpsPath
-    const pinsBySegmentIdx = new Map<number, EncounterPin[]>();
-    for (const pin of walkPins) {
-      const matchedSeg =
-        matchStreetToRouteSegment(pin.streetName, segments, allWalkStreets) ||
-        segments[0];
-      const segList = pinsBySegmentIdx.get(matchedSeg.index) || [];
-      segList.push(pin);
-      pinsBySegmentIdx.set(matchedSeg.index, segList);
+  for (const [_, clusterPins] of clusters.entries()) {
+    if (clusterPins.length === 1) {
+      result.push(clusterPins[0]);
+      continue;
     }
 
-    // Interpolate each pin cleanly along its matched route segment
-    for (const [segIdx, segPins] of pinsBySegmentIdx.entries()) {
-      const seg = segments.find((s) => s.index === segIdx) || segments[0];
-      segPins.forEach((pin, idxOnSeg) => {
-        const pt = interpolatePointOnSegment(seg, idxOnSeg, segPins.length);
-        updatedPinCoords.set(pin.id, pt);
+    // Multiple pins at the exact same coordinates:
+    // If a pin was manually relocated, respect its exact placement.
+    // Otherwise, gently separate them radially (~10 meters apart) so each is clickable.
+    const count = clusterPins.length;
+    clusterPins.forEach((p, idx) => {
+      if (p.manuallyRelocated) {
+        result.push(p);
+        return;
+      }
+      const angle = (2 * Math.PI * idx) / count;
+      const radius = 0.0001; // ~10 meters
+      const offsetLat = Math.sin(angle) * radius;
+      const offsetLng =
+        (Math.cos(angle) * radius) /
+        Math.max(0.1, Math.cos((p.lat * Math.PI) / 180));
+
+      result.push({
+        ...p,
+        lat: Number((p.lat + offsetLat).toFixed(6)),
+        lng: Number((p.lng + offsetLng).toFixed(6)),
       });
-    }
+    });
   }
 
-  const nowIso = new Date().toISOString();
-  return pins.map((pin) => {
-    const newCoord = updatedPinCoords.get(pin.id);
-    if (
-      newCoord &&
-      (Math.abs(pin.lat - newCoord[0]) > 0.00001 ||
-        Math.abs(pin.lng - newCoord[1]) > 0.00001)
-    ) {
-      return {
-        ...pin,
-        lat: newCoord[0],
-        lng: newCoord[1],
-        updatedAt: nowIso,
-      };
-    }
-    return pin;
-  });
+  return result;
 }
 
 // Async refinement: reverse-geocode any uncached route segment midpoints and snap pins to their exact street segments

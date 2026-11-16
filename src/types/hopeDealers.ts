@@ -97,6 +97,7 @@ export interface EncounterPin {
   loggedByRecorder: string;
   groupMembers: string[];
   syncStatus: 'synced' | 'pending';
+  manuallyRelocated?: boolean;
   updatedAt?: string;
 }
 

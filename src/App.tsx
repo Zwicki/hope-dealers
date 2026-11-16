@@ -277,6 +277,19 @@ export function App() {
     );
   };
 
+  const handleUpdateUser = (updatedUser: UserAccount) => {
+    setDbState((prev) =>
+      saveDatabase({
+        ...prev,
+        users: prev.users.map((u) => (u.id === updatedUser.id ? updatedUser : u)),
+      })
+    );
+    if (currentUser && currentUser.id === updatedUser.id) {
+      setCurrentUser(updatedUser);
+      localStorage.setItem('hope_dealers_current_user', JSON.stringify(updatedUser));
+    }
+  };
+
   const handleRemoveUser = (userId: string) => {
     setDbState((prev) =>
       saveDatabase({
@@ -456,6 +469,7 @@ export function App() {
             onViewMap={() => setActiveTab('map')}
             onUpdateCloudConfig={handleUpdateCloudConfig}
             onAddUser={handleAddUser}
+            onUpdateUser={handleUpdateUser}
             onRemoveUser={handleRemoveUser}
             onClearAllWalkData={handleClearAllWalkData}
             onRestoreDemoData={handleRestoreDemoData}

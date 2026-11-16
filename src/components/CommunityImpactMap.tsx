@@ -34,7 +34,10 @@ import {
   UserAccount,
   WalkSession,
 } from '../types/hopeDealers';
-import { calculateDistanceMiles } from '../services/cloudSyncService';
+import {
+  calculateDistanceMiles,
+  reverseGeocodeStreet,
+} from '../services/cloudSyncService';
 import { EncounterPinModal } from './EncounterPinModal';
 import { EditWalkModal } from './EditWalkModal';
 
@@ -272,6 +275,13 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
   const [focusedPath, setFocusedPath] = useState<[number, number][] | null>(
     null
   );
+  const [relocatingPin, setRelocatingPin] = useState<EncounterPin | null>(null);
+  const [mapToast, setMapToast] = useState<string | null>(null);
+
+  const showMapToast = (msg: string) => {
+    setMapToast(msg);
+    setTimeout(() => setMapToast(null), 4500);
+  };
 
   const filteredPins = useMemo(() => {
     return pins.filter((p) => {
@@ -310,7 +320,27 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
     return Array.from(set);
   }, [walks, pins]);
 
-  const handleMapLocationPicked = (coords: [number, number]) => {
+  const handleMapLocationPicked = async (coords: [number, number]) => {
+    if (relocatingPin) {
+      const road = await reverseGeocodeStreet(coords[0], coords[1]);
+      const updated: EncounterPin = {
+        ...relocatingPin,
+        lat: coords[0],
+        lng: coords[1],
+        streetName: road || relocatingPin.streetName,
+        manuallyRelocated: true,
+        updatedAt: new Date().toISOString(),
+      };
+      onSavePin(updated);
+      showMapToast(
+        `📍 Relocated pin for ${relocatingPin.firstName} to ${
+          road || relocatingPin.streetName
+        } (${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}) & saved to cloud!`
+      );
+      setRelocatingPin(null);
+      return;
+    }
+
     setPickedCoords(coords);
     setTapToPinMode(false);
     setEditingPin(null);
@@ -635,7 +665,28 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
 
       {/* Interactive Leaflet Map */}
       <div className="relative rounded-2xl overflow-hidden border-2 border-slate-800 shadow-2xl h-[480px] sm:h-[560px]">
-        {tapToPinMode && (
+        {mapToast && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1001] px-4 py-2 rounded-xl bg-emerald-600/95 text-white font-black text-xs shadow-2xl border border-emerald-400/50 backdrop-blur animate-bounce">
+            {mapToast}
+          </div>
+        )}
+
+        {relocatingPin && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full bg-amber-500 text-slateDark-950 font-black text-xs shadow-2xl flex items-center gap-2">
+            <span>
+              📍 Tap anywhere on map to relocate pin for {relocatingPin.firstName}
+            </span>
+            <button
+              type="button"
+              onClick={() => setRelocatingPin(null)}
+              className="px-2 py-0.5 rounded-full bg-slateDark-950 text-amber-300 text-[10px] font-bold"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {tapToPinMode && !relocatingPin && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] px-4 py-2 rounded-full bg-emerald-500 text-slateDark-950 font-black text-xs shadow-xl">
             👆 Tap any street or corner on the map to drop a Prayer / Service Pin
           </div>
@@ -659,7 +710,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
           />
 
           <MapClickWatcher
-            enabled={tapToPinMode}
+            enabled={tapToPinMode || Boolean(relocatingPin)}
             onLocationPicked={handleMapLocationPicked}
           />
 
@@ -853,6 +904,30 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
               key={pin.id}
               position={[pin.lat, pin.lng]}
               icon={createPinIcon(pin.type, pin.peopleCount || 1)}
+              draggable={Boolean(currentUser)}
+              eventHandlers={{
+                dragend: async (e) => {
+                  const marker = e.target;
+                  const newLatLng = marker.getLatLng();
+                  const newLat = Number(newLatLng.lat.toFixed(6));
+                  const newLng = Number(newLatLng.lng.toFixed(6));
+                  const road = await reverseGeocodeStreet(newLat, newLng);
+                  const updated: EncounterPin = {
+                    ...pin,
+                    lat: newLat,
+                    lng: newLng,
+                    streetName: road || pin.streetName,
+                    manuallyRelocated: true,
+                    updatedAt: new Date().toISOString(),
+                  };
+                  onSavePin(updated);
+                  showMapToast(
+                    `📍 Relocated pin for ${pin.firstName} to ${
+                      road || pin.streetName
+                    } (${newLat.toFixed(4)}, ${newLng.toFixed(4)}) & saved to cloud!`
+                  );
+                },
+              }}
             >
               <Popup>
                 <div className="space-y-2 min-w-[220px] max-w-[270px]">
@@ -913,6 +988,28 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
                           </span>
                         ) : null;
                       })}
+                    </div>
+                  )}
+
+                  {/* Drag to Relocate & Tap Map Actions */}
+                  {currentUser && (
+                    <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between gap-1 text-[11px]">
+                      <span className="text-[10px] text-amber-300 font-medium">
+                        💡 Drag pin anywhere to relocate
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRelocatingPin(pin);
+                          showMapToast(
+                            `Tap anywhere on map to relocate pin for ${pin.firstName}`
+                          );
+                        }}
+                        className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold inline-flex items-center gap-1"
+                      >
+                        <Crosshair className="w-2.5 h-2.5" />
+                        <span>Tap Map</span>
+                      </button>
                     </div>
                   )}
 

@@ -64,9 +64,24 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
   const [locatingGps, setLocatingGps] = useState(false);
   const [isListeningVoice, setIsListeningVoice] = useState(false);
 
-  // Initialize coordinates and fields when modal opens or editingPin changes
+  const prevIsOpenRef = React.useRef(false);
+  const editingPinIdRef = React.useRef<string | null | undefined>(undefined);
+
+  // Initialize coordinates and fields ONLY when modal opens or editingPin changes ID
+  // (Prevents wiping text during live walk tracking as GPS signals tick!)
   useEffect(() => {
+    const isTransitionToOpen = isOpen && !prevIsOpenRef.current;
+    const pinIdChanged =
+      editingPin && editingPin.id !== editingPinIdRef.current;
+    prevIsOpenRef.current = isOpen;
+    editingPinIdRef.current = editingPin ? editingPin.id : null;
+
     if (!isOpen) return;
+
+    // Do NOT re-initialize while user is actively typing in the open modal
+    if (!isTransitionToOpen && !pinIdChanged) {
+      return;
+    }
 
     if (editingPin) {
       setFirstName(editingPin.firstName);
@@ -80,6 +95,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       return;
     }
 
+    // New pin initial setup
     setFirstName('');
     setPeopleCount(1);
     setEncounterType('both');
@@ -95,9 +111,11 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
 
     if (lastKnownGps) {
       setCoords(lastKnownGps);
-      void reverseGeocodeStreet(lastKnownGps[0], lastKnownGps[1]).then((road) => {
-        if (road) setStreetName(road);
-      });
+      void reverseGeocodeStreet(lastKnownGps[0], lastKnownGps[1]).then(
+        (road) => {
+          if (road) setStreetName(road);
+        }
+      );
     } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
       setLocatingGps(true);
       navigator.geolocation.getCurrentPosition(
@@ -110,15 +128,20 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
           if (road) setStreetName(road);
         },
         () => {
-          const jitterLat = CHILLICOTHE_CENTER[0] + (Math.random() - 0.5) * 0.008;
-          const jitterLng = CHILLICOTHE_CENTER[1] + (Math.random() - 0.5) * 0.008;
-          setCoords([Number(jitterLat.toFixed(5)), Number(jitterLng.toFixed(5))]);
+          const jitterLat =
+            CHILLICOTHE_CENTER[0] + (Math.random() - 0.5) * 0.008;
+          const jitterLng =
+            CHILLICOTHE_CENTER[1] + (Math.random() - 0.5) * 0.008;
+          setCoords([
+            Number(jitterLat.toFixed(5)),
+            Number(jitterLng.toFixed(5)),
+          ]);
           setLocatingGps(false);
         },
         { enableHighAccuracy: true, timeout: 6000 }
       );
     }
-  }, [isOpen, editingPin, lastKnownGps, currentWalkStreets]);
+  }, [isOpen, editingPin]);
 
   if (!isOpen) return null;
 
@@ -220,14 +243,23 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       ? `${pinDate}${editingPin.timestamp.slice(10)}`
       : new Date().toISOString();
 
-    let finalCoords = coords;
-    const syncCoord = resolveStreetCoordinatesSync(targetStreet);
-    if (syncCoord) {
-      finalCoords = syncCoord;
-    } else if (!lastKnownGps) {
-      const geocoded = await forwardGeocodeStreetInChillicothe(targetStreet);
-      if (geocoded) {
-        finalCoords = geocoded;
+    // Preserve exact coords entered or picked by the user
+    let finalCoords: [number, number] = coords;
+    if (
+      !finalCoords ||
+      (finalCoords[0] === 0 && finalCoords[1] === 0) ||
+      (finalCoords[0] === CHILLICOTHE_CENTER[0] &&
+        finalCoords[1] === CHILLICOTHE_CENTER[1] &&
+        !lastKnownGps)
+    ) {
+      const syncCoord = resolveStreetCoordinatesSync(targetStreet);
+      if (syncCoord) {
+        finalCoords = syncCoord;
+      } else {
+        const geocoded = await forwardGeocodeStreetInChillicothe(targetStreet);
+        if (geocoded) {
+          finalCoords = geocoded;
+        }
       }
     }
 
@@ -235,8 +267,8 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       id: editingPin ? editingPin.id : `pin-${Date.now()}`,
       walkId: editingPin ? editingPin.walkId : walkId,
       timestamp: updatedTimestamp,
-      lat: finalCoords[0],
-      lng: finalCoords[1],
+      lat: Number(finalCoords[0].toFixed(6)),
+      lng: Number(finalCoords[1].toFixed(6)),
       streetName: targetStreet,
       firstName: cleanName,
       peopleCount: validCount,
@@ -246,6 +278,8 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       loggedByRecorder: editingPin ? editingPin.loggedByRecorder : recorderName,
       groupMembers: editingPin ? editingPin.groupMembers : groupMembers,
       syncStatus: navigator.onLine ? 'synced' : 'pending',
+      manuallyRelocated: true,
+      updatedAt: new Date().toISOString(),
     };
 
     onSavePin(savedPin);
@@ -560,56 +594,48 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             <input
               type="text"
               value={streetName}
-              onChange={(e) => {
-                const val = e.target.value;
-                setStreetName(val);
-                const resolved = resolveStreetCoordinatesSync(val);
-                if (resolved) {
-                  setCoords(resolved);
-                }
-              }}
+              onChange={(e) => setStreetName(e.target.value)}
               placeholder="Street or intersection (e.g., E 2nd St, McArthur St, Main St)"
               className="w-full px-3 py-2 rounded-lg bg-slateDark-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-phoenix-500"
             />
 
-            {editingPin && (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">
-                    Latitude
-                  </label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={coords[0]}
-                    onChange={(e) =>
-                      setCoords([
-                        parseFloat(e.target.value) || CHILLICOTHE_CENTER[0],
-                        coords[1],
-                      ])
-                    }
-                    className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">
-                    Longitude
-                  </label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={coords[1]}
-                    onChange={(e) =>
-                      setCoords([
-                        coords[0],
-                        parseFloat(e.target.value) || CHILLICOTHE_CENTER[1],
-                      ])
-                    }
-                    className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white"
-                  />
-                </div>
+            {/* Latitude and Longitude (Freely Relocate Pin Coordinates) */}
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+                  Latitude (Pin Location)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={coords[0]}
+                  onChange={(e) =>
+                    setCoords([
+                      parseFloat(e.target.value) || CHILLICOTHE_CENTER[0],
+                      coords[1],
+                    ])
+                  }
+                  className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white font-mono"
+                />
               </div>
-            )}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+                  Longitude (Pin Location)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={coords[1]}
+                  onChange={(e) =>
+                    setCoords([
+                      coords[0],
+                      parseFloat(e.target.value) || CHILLICOTHE_CENTER[1],
+                    ])
+                  }
+                  className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white font-mono"
+                />
+              </div>
+            </div>
 
             {/* Quick Street Chips */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
