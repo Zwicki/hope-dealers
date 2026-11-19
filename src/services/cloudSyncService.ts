@@ -36,6 +36,64 @@ export const SEED_WALKS: WalkSession[] = [];
 
 export const SEED_PINS: EncounterPin[] = [];
 
+/**
+ * Normalizes walk interaction count according to business rule:
+ * 1. If no interactions entered for a route but prayers were logged, set interactions = prayers + linked services.
+ * 2. If interactions are entered and less than sum of prayers + linked services, set interactions = sum.
+ * Also checks associated encounter pins to ensure prayers and services accurately reflect all logged encounters.
+ */
+export function normalizeWalkInteractions(
+  walk: WalkSession,
+  associatedPins?: EncounterPin[]
+): WalkSession {
+  let prayers = Math.max(0, walk.prayersCount || 0);
+  let services = Math.max(0, walk.serviceLinkagesCount || 0);
+
+  if (associatedPins && associatedPins.length > 0) {
+    const walkPins = associatedPins.filter((p) => p.walkId === walk.id);
+    if (walkPins.length > 0) {
+      const pinPrayers = walkPins
+        .filter((p) => p.type === 'prayer' || p.type === 'both')
+        .reduce((sum, p) => sum + Math.max(1, p.peopleCount || 1), 0);
+      const pinServices = walkPins
+        .filter(
+          (p) =>
+            p.type === 'service' ||
+            p.type === 'both' ||
+            (p.needCategories && p.needCategories.length > 0)
+        )
+        .reduce((sum, p) => sum + Math.max(1, p.peopleCount || 1), 0);
+
+      prayers = Math.max(prayers, pinPrayers);
+      services = Math.max(services, pinServices);
+    }
+  }
+
+  const sumPrayersServices = prayers + services;
+  const enteredInteractions = Math.max(0, walk.interactionsCount || 0);
+
+  let finalInteractions = enteredInteractions;
+  if (sumPrayersServices > 0) {
+    if (enteredInteractions === 0 || enteredInteractions < sumPrayersServices) {
+      finalInteractions = sumPrayersServices;
+    }
+  }
+
+  if (
+    finalInteractions !== walk.interactionsCount ||
+    prayers !== walk.prayersCount ||
+    services !== walk.serviceLinkagesCount
+  ) {
+    return {
+      ...walk,
+      interactionsCount: finalInteractions,
+      prayersCount: prayers,
+      serviceLinkagesCount: services,
+    };
+  }
+  return walk;
+}
+
 const DEFAULT_CLOUD_CONFIG: CloudConfig = {
   enabled: true,
   provider: 'cloud_storage',
@@ -109,6 +167,10 @@ export function loadDatabase(): AppDatabaseState {
     );
     const beforePinsJson = JSON.stringify(parsed.pins);
     parsed.pins = unstackAndResolvePins(parsed.walks, parsed.pins);
+    // Normalize all walks to ensure interactionsCount >= prayers + linked services
+    parsed.walks = parsed.walks.map((w) =>
+      normalizeWalkInteractions(w, parsed.pins)
+    );
     parsed.users = ensureSuperUser(parsed.users || []);
     parsed.deletedWalkIds = parsed.deletedWalkIds || [];
     parsed.deletedPinIds = parsed.deletedPinIds || [];
@@ -146,8 +208,12 @@ export function saveDatabase(
 ): AppDatabaseState {
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   const nowIso = new Date().toISOString();
+  const normalizedWalks = (state.walks || []).map((w) =>
+    normalizeWalkInteractions(w, state.pins)
+  );
   const updated: AppDatabaseState = {
     ...state,
+    walks: normalizedWalks,
     users: ensureSuperUser(state.users || []),
     deletedWalkIds: state.deletedWalkIds || [],
     deletedPinIds: state.deletedPinIds || [],
@@ -191,15 +257,16 @@ function applyRemoteRecordToLocal(
   record: NonNullable<NetlifyCloudResponse['record']>
 ): AppDatabaseState {
   const nowIso = new Date().toISOString();
-  const mergedWalks = ((record.walks || []) as WalkSession[])
-    .filter((w) => !w.id.startsWith('walk-seed-'))
-    .map((w) => ({ ...w, syncStatus: 'synced' as const }))
-    .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''));
-
   const rawPins = ((record.pins || []) as EncounterPin[])
     .filter((p) => !p.id.startsWith('pin-seed-'))
     .map((p) => ({ ...p, syncStatus: 'synced' as const }))
     .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+  const mergedWalks = ((record.walks || []) as WalkSession[])
+    .filter((w) => !w.id.startsWith('walk-seed-'))
+    .map((w) => ({ ...w, syncStatus: 'synced' as const }))
+    .map((w) => normalizeWalkInteractions(w, rawPins))
+    .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''));
 
   const mergedPins = unstackAndResolvePins(mergedWalks, rawPins);
 
@@ -406,12 +473,13 @@ export async function pullFromRemoteCloud(): Promise<AppDatabaseState | null> {
         if (r?.payload?.id) mergedPinsMap.set(r.payload.id, r.payload);
       });
 
+      const allPinsList = Array.from(mergedPinsMap.values());
       const nextState: AppDatabaseState = {
         ...current,
-        walks: Array.from(mergedWalksMap.values()).sort((a, b) =>
-          b.startTime.localeCompare(a.startTime)
-        ),
-        pins: Array.from(mergedPinsMap.values()).sort((a, b) =>
+        walks: Array.from(mergedWalksMap.values())
+          .map((w) => normalizeWalkInteractions(w, allPinsList))
+          .sort((a, b) => b.startTime.localeCompare(a.startTime)),
+        pins: allPinsList.sort((a, b) =>
           b.timestamp.localeCompare(a.timestamp)
         ),
         cloudConfig: {

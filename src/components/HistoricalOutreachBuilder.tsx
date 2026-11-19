@@ -454,16 +454,25 @@ export const HistoricalOutreachBuilder: React.FC<
     };
 
     const nextDrafts = [...draftPins, newDraft];
-    const totalDraftPeople = nextDrafts.reduce(
-      (sum, d) => sum + Math.max(1, d.peopleCount || 1),
-      0
-    );
+    const draftPrayerPeople = nextDrafts
+      .filter((d) => d.type === 'prayer' || d.type === 'both')
+      .reduce((sum, d) => sum + Math.max(1, d.peopleCount || 1), 0);
+    const draftServicePeople = nextDrafts
+      .filter(
+        (d) =>
+          d.type === 'service' ||
+          d.type === 'both' ||
+          (d.needCategories && d.needCategories.length > 0)
+      )
+      .reduce((sum, d) => sum + Math.max(1, d.peopleCount || 1), 0);
+
     setDraftPins(nextDrafts);
-    setPrayersCount((c) => Math.max(c + validCount, totalDraftPeople));
-    setInteractionsCount((c) => Math.max(c + validCount, totalDraftPeople));
-    if (pinType === 'service' || pinType === 'both' || pinNeeds.length > 0) {
-      setServiceLinkagesCount((c) => c + validCount);
-    }
+    const nextPrayers = Math.max(prayersCount, draftPrayerPeople);
+    const nextServices = Math.max(serviceLinkagesCount, draftServicePeople);
+    setPrayersCount(nextPrayers);
+    setServiceLinkagesCount(nextServices);
+    const sumPrayersServices = nextPrayers + nextServices;
+    setInteractionsCount((c) => Math.max(c, sumPrayersServices));
 
     setPinFirstName('');
     setPinPeopleCount(1);
@@ -631,10 +640,31 @@ export const HistoricalOutreachBuilder: React.FC<
       });
     }
 
-    const totalPeopleFromPins = builtPins.reduce(
-      (sum, p) => sum + Math.max(1, p.peopleCount || 1),
-      0
-    );
+    const prayerPeopleFromPins = builtPins
+      .filter((p) => p.type === 'prayer' || p.type === 'both')
+      .reduce((sum, p) => sum + Math.max(1, p.peopleCount || 1), 0);
+    const servicePeopleFromPins = builtPins
+      .filter(
+        (p) =>
+          p.type === 'service' ||
+          p.type === 'both' ||
+          (p.needCategories && p.needCategories.length > 0)
+      )
+      .reduce((sum, p) => sum + Math.max(1, p.peopleCount || 1), 0);
+
+    const finalPrayers = Math.max(prayersCount, prayerPeopleFromPins);
+    const finalServices = Math.max(serviceLinkagesCount, servicePeopleFromPins);
+    const sumPrayersServices = finalPrayers + finalServices;
+
+    // Business rule:
+    // "If no interactions entered for a route but prayers were logged then set interactions to equal prayers + linked services.
+    //  If interactions are logged and it is less than sum of prayers + linked services, then set interactions to equal the sum."
+    let finalInteractions = interactionsCount;
+    if (sumPrayersServices > 0) {
+      if (interactionsCount === 0 || interactionsCount < sumPrayersServices) {
+        finalInteractions = sumPrayersServices;
+      }
+    }
 
     const builtInteractions: CommunityInteractionPoint[] = [
       ...interactionSpots.map((pt, idx) => ({
@@ -688,9 +718,9 @@ export const HistoricalOutreachBuilder: React.FC<
       },
       gpsPath: finalRoute,
       interactionLocations: builtInteractions,
-      interactionsCount: Math.max(interactionsCount, totalPeopleFromPins),
-      prayersCount: Math.max(prayersCount, totalPeopleFromPins),
-      serviceLinkagesCount,
+      interactionsCount: finalInteractions,
+      prayersCount: finalPrayers,
+      serviceLinkagesCount: finalServices,
       trashBagsCount,
       trashWeightLbs,
       notes: notes.trim() || undefined,
@@ -1186,8 +1216,19 @@ export const HistoricalOutreachBuilder: React.FC<
                 onChange={(e) =>
                   setInteractionsCount(Math.max(0, parseInt(e.target.value) || 0))
                 }
+                onBlur={() => {
+                  const sum = prayersCount + serviceLinkagesCount;
+                  if (sum > 0 && interactionsCount < sum) {
+                    setInteractionsCount(sum);
+                  }
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slateDark-950 border border-slate-700 text-sm font-black text-white"
               />
+              {prayersCount + serviceLinkagesCount > 0 && (
+                <p className="text-[10px] text-blue-400 mt-1">
+                  Min: {prayersCount + serviceLinkagesCount} (prayers + linked services)
+                </p>
+              )}
             </div>
 
             <div>
@@ -1198,9 +1239,15 @@ export const HistoricalOutreachBuilder: React.FC<
                 type="number"
                 min="0"
                 value={prayersCount}
-                onChange={(e) =>
-                  setPrayersCount(Math.max(0, parseInt(e.target.value) || 0))
-                }
+                onChange={(e) => {
+                  const newPrayers = Math.max(0, parseInt(e.target.value) || 0);
+                  setPrayersCount(newPrayers);
+                  const sum = newPrayers + serviceLinkagesCount;
+                  setInteractionsCount((prev) => {
+                    if (prev === 0 || prev < sum) return sum;
+                    return prev;
+                  });
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slateDark-950 border border-slate-700 text-sm font-black text-white"
               />
             </div>
@@ -1213,11 +1260,15 @@ export const HistoricalOutreachBuilder: React.FC<
                 type="number"
                 min="0"
                 value={serviceLinkagesCount}
-                onChange={(e) =>
-                  setServiceLinkagesCount(
-                    Math.max(0, parseInt(e.target.value) || 0)
-                  )
-                }
+                onChange={(e) => {
+                  const newServices = Math.max(0, parseInt(e.target.value) || 0);
+                  setServiceLinkagesCount(newServices);
+                  const sum = prayersCount + newServices;
+                  setInteractionsCount((prev) => {
+                    if (prev === 0 || prev < sum) return sum;
+                    return prev;
+                  });
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slateDark-950 border border-slate-700 text-sm font-black text-white"
               />
             </div>

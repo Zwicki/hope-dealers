@@ -9,6 +9,7 @@ import {
 import {
   loadCurrentSession,
   loadDatabase,
+  normalizeWalkInteractions,
   pullFromRemoteCloud,
   refineWalkPinsWithRouteGeocoding,
   saveCurrentSession,
@@ -159,8 +160,9 @@ export function App() {
 
   const handleSaveWalk = (walk: WalkSession) => {
     const nowIso = new Date().toISOString();
-    const walkWithTs: WalkSession = { ...walk, updatedAt: nowIso };
     setDbState((prev) => {
+      const normalizedWalk = normalizeWalkInteractions(walk, prev.pins);
+      const walkWithTs: WalkSession = { ...normalizedWalk, updatedAt: nowIso };
       const updatedWalks = [
         walkWithTs,
         ...prev.walks.filter((w) => w.id !== walk.id),
@@ -185,9 +187,18 @@ export function App() {
     const nowIso = new Date().toISOString();
     const pinWithTs: EncounterPin = { ...pin, updatedAt: nowIso };
     setDbState((prev) => {
+      const updatedPins = [
+        pinWithTs,
+        ...prev.pins.filter((p) => p.id !== pin.id),
+      ];
+      // If pin belongs to a walk, normalize that walk's interactions count as well
+      const updatedWalks = prev.walks.map((w) =>
+        w.id === pin.walkId ? normalizeWalkInteractions(w, updatedPins) : w
+      );
       const updated = saveDatabase({
         ...prev,
-        pins: [pinWithTs, ...prev.pins.filter((p) => p.id !== pin.id)],
+        pins: updatedPins,
+        walks: updatedWalks,
         deletedPinIds: (prev.deletedPinIds || []).filter((id) => id !== pin.id),
       });
       return updated;
@@ -199,12 +210,14 @@ export function App() {
     newPins: EncounterPin[]
   ) => {
     const nowIso = new Date().toISOString();
-    const walkWithTs: WalkSession = { ...walk, updatedAt: nowIso };
     const pinsWithTs: EncounterPin[] = newPins.map((p) => ({
       ...p,
       updatedAt: nowIso,
     }));
     setDbState((prev) => {
+      const allPinsForWalk = [...pinsWithTs, ...prev.pins];
+      const normalizedWalk = normalizeWalkInteractions(walk, allPinsForWalk);
+      const walkWithTs: WalkSession = { ...normalizedWalk, updatedAt: nowIso };
       const updatedWalks = [
         walkWithTs,
         ...prev.walks.filter((w) => w.id !== walk.id),

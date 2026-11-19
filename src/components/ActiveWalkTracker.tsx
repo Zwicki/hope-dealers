@@ -517,11 +517,15 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
     if (kind === 'interaction') {
       setInteractionsCount((c) => c + validCount);
     } else if (kind === 'prayer') {
-      setPrayersCount((c) => c + validCount);
-      setInteractionsCount((c) => c + validCount);
+      const nextPrayers = prayersCount + validCount;
+      setPrayersCount(nextPrayers);
+      const minInteractions = nextPrayers + serviceLinkagesCount;
+      setInteractionsCount((c) => Math.max(c + validCount, minInteractions));
     } else if (kind === 'service') {
-      setServiceLinkagesCount((c) => c + validCount);
-      setInteractionsCount((c) => c + validCount);
+      const nextServices = serviceLinkagesCount + validCount;
+      setServiceLinkagesCount(nextServices);
+      const minInteractions = prayersCount + nextServices;
+      setInteractionsCount((c) => Math.max(c + validCount, minInteractions));
     }
 
     acquireCurrentGpsCoordinate((lat, lng, street) => {
@@ -602,17 +606,22 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
     const count = Math.max(1, pin.peopleCount || 1);
     onSavePin(pin);
     if (!isEditing) {
-      setInteractionsCount((c) => c + count);
+      let nextPrayers = prayersCount;
+      let nextServices = serviceLinkagesCount;
       if (pin.type === 'prayer' || pin.type === 'both') {
-        setPrayersCount((c) => c + count);
+        nextPrayers += count;
+        setPrayersCount(nextPrayers);
       }
       if (
         pin.type === 'service' ||
         pin.type === 'both' ||
         pin.needCategories.length > 0
       ) {
-        setServiceLinkagesCount((c) => c + count);
+        nextServices += count;
+        setServiceLinkagesCount(nextServices);
       }
+      const minInteractions = nextPrayers + nextServices;
+      setInteractionsCount((c) => Math.max(c + count, minInteractions));
       if (pin.streetName && !streetsWalked.includes(pin.streetName)) {
         setStreetsWalked((prev) => [...prev, pin.streetName]);
       }
@@ -724,6 +733,14 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
       timestamp: new Date().toISOString(),
     };
 
+    const sumPrayersServices = prayersCount + serviceLinkagesCount;
+    let finalInteractions = interactionsCount;
+    if (sumPrayersServices > 0) {
+      if (interactionsCount === 0 || interactionsCount < sumPrayersServices) {
+        finalInteractions = sumPrayersServices;
+      }
+    }
+
     const completedWalk: WalkSession = {
       id: walkId,
       date: new Date().toISOString().slice(0, 10),
@@ -742,7 +759,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
       endPoint: finalEndPoint,
       gpsPath: finalPath,
       interactionLocations,
-      interactionsCount,
+      interactionsCount: finalInteractions,
       prayersCount,
       serviceLinkagesCount,
       trashBagsCount,
@@ -1210,7 +1227,8 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setInteractionsCount((c) => Math.max(0, c - 1));
+                  const minRequired = prayersCount + serviceLinkagesCount;
+                  setInteractionsCount((c) => Math.max(minRequired, c - 1));
                   setInteractionLocations((prev) => prev.slice(0, -1));
                 }}
                 className="w-12 h-12 rounded-xl bg-slateDark-950 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition"

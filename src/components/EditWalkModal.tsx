@@ -239,6 +239,14 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
     const volHours = Number(((durationMinutes / 60) * groupSize).toFixed(2));
     const finalRoute = routePoints;
 
+    const sumPrayersServices = prayersCount + serviceLinkagesCount;
+    let finalInteractions = interactionsCount;
+    if (sumPrayersServices > 0) {
+      if (interactionsCount === 0 || interactionsCount < sumPrayersServices) {
+        finalInteractions = sumPrayersServices;
+      }
+    }
+
     const updated: WalkSession = {
       ...walk,
       date,
@@ -274,7 +282,7 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
             }
           : undefined,
       gpsPath: finalRoute,
-      interactionsCount,
+      interactionsCount: finalInteractions,
       prayersCount,
       serviceLinkagesCount,
       trashBagsCount,
@@ -401,8 +409,19 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 onChange={(e) =>
                   setInteractionsCount(Math.max(0, parseInt(e.target.value) || 0))
                 }
+                onBlur={() => {
+                  const sum = prayersCount + serviceLinkagesCount;
+                  if (sum > 0 && interactionsCount < sum) {
+                    setInteractionsCount(sum);
+                  }
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slateDark-950 border border-slate-700 text-sm font-black text-white"
               />
+              {prayersCount + serviceLinkagesCount > 0 && (
+                <p className="text-[10px] text-blue-400 mt-1">
+                  Min: {prayersCount + serviceLinkagesCount} (prayers + linked services)
+                </p>
+              )}
             </div>
 
             <div>
@@ -413,9 +432,15 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 type="number"
                 min="0"
                 value={prayersCount}
-                onChange={(e) =>
-                  setPrayersCount(Math.max(0, parseInt(e.target.value) || 0))
-                }
+                onChange={(e) => {
+                  const newPrayers = Math.max(0, parseInt(e.target.value) || 0);
+                  setPrayersCount(newPrayers);
+                  const sum = newPrayers + serviceLinkagesCount;
+                  setInteractionsCount((prev) => {
+                    if (prev === 0 || prev < sum) return sum;
+                    return prev;
+                  });
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slateDark-950 border border-slate-700 text-sm font-black text-white"
               />
             </div>
@@ -428,11 +453,15 @@ export const EditWalkModal: React.FC<EditWalkModalProps> = ({
                 type="number"
                 min="0"
                 value={serviceLinkagesCount}
-                onChange={(e) =>
-                  setServiceLinkagesCount(
-                    Math.max(0, parseInt(e.target.value) || 0)
-                  )
-                }
+                onChange={(e) => {
+                  const newServices = Math.max(0, parseInt(e.target.value) || 0);
+                  setServiceLinkagesCount(newServices);
+                  const sum = prayersCount + newServices;
+                  setInteractionsCount((prev) => {
+                    if (prev === 0 || prev < sum) return sum;
+                    return prev;
+                  });
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slateDark-950 border border-slate-700 text-sm font-black text-white"
               />
             </div>
