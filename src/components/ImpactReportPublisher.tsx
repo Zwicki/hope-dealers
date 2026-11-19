@@ -100,30 +100,48 @@ export const ImpactReportPublisher: React.FC<ImpactReportPublisherProps> = ({
 
   // Compute aggregated metrics
   const stats = useMemo(() => {
-    const totalInteractions = filteredWalks.reduce(
-      (sum, w) => sum + w.interactionsCount,
-      0
+    const walkIds = new Set(filteredWalks.map((w) => w.id));
+    const standalonePins = filteredPins.filter(
+      (p) => !p.walkId || !walkIds.has(p.walkId)
     );
-    const totalPrayers = Math.max(
-      filteredWalks.reduce((sum, w) => sum + w.prayersCount, 0),
-      filteredPins.reduce(
-        (sum, p) =>
-          p.type === 'prayer' || p.type === 'both'
-            ? sum + Math.max(1, p.peopleCount || 1)
-            : sum,
-        0
-      )
-    );
-    const totalServiceLinkages = Math.max(
-      filteredWalks.reduce((sum, w) => sum + w.serviceLinkagesCount, 0),
-      filteredPins.reduce(
-        (sum, p) =>
-          p.type === 'service' || p.type === 'both'
-            ? sum + Math.max(1, p.peopleCount || 1)
-            : sum,
-        0
-      )
-    );
+
+    const totalPrayers =
+      filteredWalks.reduce((sum, w) => {
+        const pinsForWalk = filteredPins.filter((p) => p.walkId === w.id);
+        const pinPrayers = pinsForWalk
+          .filter((p) => p.type === 'prayer' || p.type === 'both')
+          .reduce((s, p) => s + Math.max(1, p.peopleCount || 1), 0);
+        return sum + Math.max(w.prayersCount || 0, pinPrayers);
+      }, 0) +
+      standalonePins
+        .filter((p) => p.type === 'prayer' || p.type === 'both')
+        .reduce((s, p) => s + Math.max(1, p.peopleCount || 1), 0);
+
+    const totalServiceLinkages =
+      filteredWalks.reduce((sum, w) => {
+        const pinsForWalk = filteredPins.filter((p) => p.walkId === w.id);
+        const pinServices = pinsForWalk
+          .filter(
+            (p) =>
+              p.type === 'service' ||
+              p.type === 'both' ||
+              (p.needCategories && p.needCategories.length > 0)
+          )
+          .reduce((s, p) => s + Math.max(1, p.peopleCount || 1), 0);
+        return sum + Math.max(w.serviceLinkagesCount || 0, pinServices);
+      }, 0) +
+      standalonePins
+        .filter(
+          (p) =>
+            p.type === 'service' ||
+            p.type === 'both' ||
+            (p.needCategories && p.needCategories.length > 0)
+        )
+        .reduce((s, p) => s + Math.max(1, p.peopleCount || 1), 0);
+
+    const totalInteractions =
+      filteredWalks.reduce((sum, w) => sum + w.interactionsCount, 0) +
+      standalonePins.reduce((s, p) => s + Math.max(1, p.peopleCount || 1), 0);
     const totalMiles = Number(
       filteredWalks.reduce((sum, w) => sum + w.milesWalked, 0).toFixed(1)
     );

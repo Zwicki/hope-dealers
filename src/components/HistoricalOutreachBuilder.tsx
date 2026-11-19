@@ -5,6 +5,7 @@ import {
   Polyline,
   Marker,
   Popup,
+  useMap,
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
@@ -63,6 +64,7 @@ interface HistoricalOutreachBuilderProps {
   lbsPerTrashBag: number;
   onSaveHistoricalWalk: (walk: WalkSession, newPins: EncounterPin[]) => void;
   onSaveStandalonePin: (pin: EncounterPin) => void;
+  onDeletePin?: (pinId: string) => void;
   onViewMap?: () => void;
   onViewImpact?: () => void;
 }
@@ -145,6 +147,51 @@ const prayerIcon = L.divIcon({
   iconAnchor: [15, 15],
 });
 
+const encounterPinIcon = (type: EncounterType) => {
+  let emoji = '🙏';
+  let bg = 'linear-gradient(135deg,#f97316,#dc2626)';
+  if (type === 'service') {
+    emoji = '🤝';
+    bg = 'linear-gradient(135deg,#10b981,#059669)';
+  } else if (type === 'both') {
+    emoji = '✨';
+    bg = 'linear-gradient(135deg,#eab308,#f97316)';
+  }
+  return L.divIcon({
+    className: 'hist-drop-pin-icon',
+    html: `<div style="
+      width: 32px;
+      height: 32px;
+      border-radius: 9999px;
+      background: ${bg};
+      border: 2.5px solid #ffffff;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      cursor: pointer;
+    ">${emoji}</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+};
+
+const FitRouteBounds: React.FC<{ points: [number, number][] }> = ({ points }) => {
+  const map = useMap();
+  React.useEffect(() => {
+    if (points && points.length > 0) {
+      try {
+        const bounds = L.latLngBounds(points.map((p) => [p[0], p[1]]));
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+      } catch {
+        // map bounds fallback
+      }
+    }
+  }, [points, map]);
+  return null;
+};
+
 const MapClickCapture: React.FC<{
   onMapClick: (lat: number, lng: number) => void;
 }> = ({ onMapClick }) => {
@@ -158,6 +205,23 @@ const MapClickCapture: React.FC<{
   });
   return null;
 };
+
+interface SavedWalkForPinPlacement {
+  walk: WalkSession;
+  targetPrayers: number;
+  targetServices: number;
+}
+
+interface ActiveDropPinModalState {
+  lat: number;
+  lng: number;
+  streetName: string;
+  firstName: string;
+  peopleCount: number;
+  type: EncounterType;
+  needCategories: NeedCategoryId[];
+  description: string;
+}
 
 interface DraftPrayerPin {
   id: string;
@@ -182,12 +246,22 @@ export const HistoricalOutreachBuilder: React.FC<
   lbsPerTrashBag,
   onSaveHistoricalWalk,
   onSaveStandalonePin,
+  onDeletePin,
   onViewMap,
   onViewImpact,
 }) => {
   const [entryMode, setEntryMode] = useState<'full_walk' | 'standalone_pin'>(
     'full_walk'
   );
+
+  // Post-save Pin Dropping Mode
+  const [walkPendingPins, setWalkPendingPins] =
+    useState<SavedWalkForPinPlacement | null>(null);
+  const [droppedPinsForWalk, setDroppedPinsForWalk] = useState<EncounterPin[]>(
+    []
+  );
+  const [activeDropPinModal, setActiveDropPinModal] =
+    useState<ActiveDropPinModalState | null>(null);
 
   // Past Walk State
   const [walkDate, setWalkDate] = useState<string>(
@@ -482,6 +556,27 @@ export const HistoricalOutreachBuilder: React.FC<
     setHasCustomClickedPinCoords(false);
   };
 
+  const resetWalkForm = () => {
+    setRoutePoints([]);
+    setWaypointStreets({});
+    setIsLoopClosed(false);
+    setMilesWalked(0);
+    setStreetsWalked([]);
+    setDraftPins([]);
+    setPinFirstName('');
+    setPinDescription('');
+    setPinStreet('');
+    setHasCustomClickedPinCoords(false);
+    setPinNeeds([]);
+    setInteractionSpots([]);
+    setInteractionsCount(0);
+    setPrayersCount(0);
+    setServiceLinkagesCount(0);
+    setTrashBagsCount(0);
+    setTrashWeightLbs(0);
+    setNotes('');
+  };
+
   const handleSaveFullHistoricalWalk = async (e: React.FormEvent) => {
     e.preventDefault();
     const walkId = `walk-hist-${Date.now()}`;
@@ -521,153 +616,22 @@ export const HistoricalOutreachBuilder: React.FC<
         ? Number(milesWalked.toFixed(2))
         : Number(Math.max(0.5, (durationMinutes / 60) * 1.2).toFixed(2));
 
-    // Automatically include any typed person in the Prayer Pin inputs even if the user didn't click "Add Person to This Walk" first
-    const allDraftPins: DraftPrayerPin[] = [...draftPins];
-    if (
-      pinFirstName.trim() ||
-      pinDescription.trim() ||
-      pinStreet.trim() ||
-      pinNeeds.length > 0
-    ) {
-      const validCount = Math.max(1, pinPeopleCount || 1);
-      const targetStreet =
-        pinStreet.trim() ||
-        streetsWalked[allDraftPins.length % Math.max(1, streetsWalked.length)] ||
-        'Paint St';
-      const cleanName =
-        pinFirstName.trim() ||
-        (validCount > 1 ? `Group of ${validCount} Friends` : 'Community Friend');
-      const cleanDesc =
-        pinDescription.trim() ||
-        `Prayed with ${cleanName} (${validCount} ${
-          validCount === 1 ? 'person' : 'people'
-        }) on ${targetStreet}.`;
-
-      const existingCoords = allDraftPins.map(
-        (d) => [d.lat, d.lng] as [number, number]
-      );
-      const autoCoord = hasCustomClickedPinCoords
-        ? applyAntiStackOffset(pinCoords, existingCoords)
-        : pinSnapToRoute && finalRoute.length >= 2
-        ? (await forwardGeocodeStreetInChillicothe(
-            targetStreet,
-            finalRoute,
-            waypointStreets,
-            existingCoords,
-            true
-          )) ||
-          applyAntiStackOffset(
-            finalRoute[allDraftPins.length % finalRoute.length] ?? pinCoords,
-            existingCoords
-          )
-        : (await forwardGeocodeStreetInChillicothe(
-            targetStreet,
-            [],
-            {},
-            existingCoords,
-            false
-          )) || applyAntiStackOffset(pinCoords, existingCoords);
-
-      allDraftPins.push({
-        id: `draft-pin-auto-${Date.now()}`,
-        firstName: cleanName,
-        peopleCount: validCount,
-        type: pinType,
-        needCategories: pinNeeds,
-        description: cleanDesc,
-        streetName: targetStreet,
-        lat: autoCoord[0],
-        lng: autoCoord[1],
-        snapToPath: pinSnapToRoute,
-      });
-    }
-
-    // Ensure every draft pin is placed on its indicated street and never stacked on another pin
-    const placedPinCoords: Array<[number, number]> = [];
-    const builtPins: EncounterPin[] = [];
-    for (let idx = 0; idx < allDraftPins.length; idx++) {
-      const dp = allDraftPins[idx];
-      let finalLat = dp.lat;
-      let finalLng = dp.lng;
-
-      // Verify if dp.lat/lng is stacked with an already placed pin, or resolve by streetName
-      const isStackedWithPrev = placedPinCoords.some(
-        (c) =>
-          Math.abs(c[0] - finalLat) < 0.00018 &&
-          Math.abs(c[1] - finalLng) < 0.00018
-      );
-      if (isStackedWithPrev) {
-        const streetResolved = await forwardGeocodeStreetInChillicothe(
-          dp.streetName,
-          dp.snapToPath ? finalRoute : [],
-          dp.snapToPath ? waypointStreets : {},
-          placedPinCoords,
-          Boolean(dp.snapToPath)
-        );
-        if (streetResolved) {
-          finalLat = streetResolved[0];
-          finalLng = streetResolved[1];
-        } else {
-          const offset = applyAntiStackOffset(
-            [finalLat, finalLng],
-            placedPinCoords
-          );
-          finalLat = offset[0];
-          finalLng = offset[1];
-        }
-      }
-
-      placedPinCoords.push([finalLat, finalLng]);
-      builtPins.push({
-        id: `pin-hist-${Date.now()}-${idx}`,
-        walkId,
-        timestamp: new Date(
-          new Date(startIso).getTime() + (idx + 1) * 600000
-        ).toISOString(),
-        lat: finalLat,
-        lng: finalLng,
-        streetName: dp.streetName,
-        firstName: dp.firstName,
-        peopleCount: Math.max(1, dp.peopleCount || 1),
-        description: dp.description,
-        type: dp.type,
-        needCategories: dp.needCategories,
-        loggedByRecorder: currentUser.name,
-        groupMembers,
-        syncStatus: navigator.onLine ? 'synced' : 'pending',
-        manuallyRelocated: !dp.snapToPath,
-        snapToPath: dp.snapToPath,
-      });
-    }
-
-    const prayerPeopleFromPins = builtPins
-      .filter((p) => p.type === 'prayer' || p.type === 'both')
-      .reduce((sum, p) => sum + Math.max(1, p.peopleCount || 1), 0);
-    const servicePeopleFromPins = builtPins
-      .filter(
-        (p) =>
-          p.type === 'service' ||
-          p.type === 'both' ||
-          (p.needCategories && p.needCategories.length > 0)
-      )
-      .reduce((sum, p) => sum + Math.max(1, p.peopleCount || 1), 0);
-
-    const finalPrayers = Math.max(prayersCount, prayerPeopleFromPins);
-    const finalServices = Math.max(serviceLinkagesCount, servicePeopleFromPins);
+    const finalPrayers = Math.max(0, prayersCount || 0);
+    const finalServices = Math.max(0, serviceLinkagesCount || 0);
     const sumPrayersServices = finalPrayers + finalServices;
 
     // Business rule:
-    // "If no interactions entered for a route but prayers were logged then set interactions to equal prayers + linked services.
-    //  If interactions are logged and it is less than sum of prayers + linked services, then set interactions to equal the sum."
-    let finalInteractions = interactionsCount;
+    // If no interactions entered for a route but prayers/services were logged,
+    // set interactions to equal prayers + linked services.
+    let finalInteractions = Math.max(0, interactionsCount || 0);
     if (sumPrayersServices > 0) {
-      if (interactionsCount === 0 || interactionsCount < sumPrayersServices) {
+      if (finalInteractions === 0 || finalInteractions < sumPrayersServices) {
         finalInteractions = sumPrayersServices;
       }
     }
 
-    const builtInteractions: CommunityInteractionPoint[] = [
-      ...interactionSpots.map((pt, idx) => ({
+    const builtInteractions: CommunityInteractionPoint[] =
+      interactionSpots.map((pt, idx) => ({
         id: `int-hist-${Date.now()}-${idx}`,
         walkId,
         lat: pt[0],
@@ -675,18 +639,7 @@ export const HistoricalOutreachBuilder: React.FC<
         streetName: streetsWalked[0] || 'Chillicothe Outreach',
         timestamp: startIso,
         kind: 'interaction' as const,
-      })),
-      ...builtPins.map((bp) => ({
-        id: `int-pin-${bp.id}`,
-        walkId,
-        lat: bp.lat,
-        lng: bp.lng,
-        streetName: bp.streetName,
-        timestamp: bp.timestamp,
-        kind:
-          bp.type === 'service' ? ('service' as const) : ('prayer' as const),
-      })),
-    ];
+      }));
 
     const newWalk: WalkSession = {
       id: walkId,
@@ -727,29 +680,136 @@ export const HistoricalOutreachBuilder: React.FC<
       syncStatus: navigator.onLine ? 'synced' : 'pending',
     };
 
-    onSaveHistoricalWalk(newWalk, builtPins);
-    setRoutePoints([]);
-    setWaypointStreets({});
-    setIsLoopClosed(false);
-    setMilesWalked(0);
-    setStreetsWalked([]);
-    setDraftPins([]);
-    setPinFirstName('');
-    setPinDescription('');
-    setPinStreet('');
-    setHasCustomClickedPinCoords(false);
-    setPinNeeds([]);
-    setInteractionSpots([]);
-    setInteractionsCount(0);
-    setPrayersCount(0);
-    setServiceLinkagesCount(0);
-    setTrashBagsCount(0);
-    setTrashWeightLbs(0);
-    setNotes('');
-    setSavedToast(
-      `✅ Walk Saved Successfully! Date: ${normalizedDate} • Distance: ${finalMiles} mi • Volunteer Hours: ${volHours} hrs • Prayer Pins: ${builtPins.length}`
-    );
-    setTimeout(() => setSavedToast(null), 12000);
+    onSaveHistoricalWalk(newWalk, []);
+
+    if (finalPrayers > 0 || finalServices > 0) {
+      // Enter post-save pin dropping mode on this saved route map
+      setWalkPendingPins({
+        walk: newWalk,
+        targetPrayers: finalPrayers,
+        targetServices: finalServices,
+      });
+      setDroppedPinsForWalk([]);
+      setActiveDropPinModal(null);
+    } else {
+      resetWalkForm();
+      setSavedToast(
+        `✅ Walk Saved Successfully! Date: ${normalizedDate} • Distance: ${finalMiles} mi • Volunteer Hours: ${volHours} hrs`
+      );
+      setTimeout(() => setSavedToast(null), 12000);
+    }
+  };
+
+  const handlePinMapClick = async (lat: number, lng: number) => {
+    if (!walkPendingPins) return;
+
+    let bestStreet =
+      walkPendingPins.walk.streetsWalked[0] || 'Chillicothe Street';
+    try {
+      const geo = await reverseGeocodeStreet(lat, lng);
+      if (geo && geo !== 'Chillicothe, OH') {
+        bestStreet = geo;
+      }
+    } catch {
+      // Keep bestStreet
+    }
+
+    const currentPrayers = droppedPinsForWalk.filter(
+      (p) => p.type === 'prayer' || p.type === 'both'
+    ).length;
+    const currentServices = droppedPinsForWalk.filter(
+      (p) =>
+        p.type === 'service' ||
+        p.type === 'both' ||
+        (p.needCategories && p.needCategories.length > 0)
+    ).length;
+
+    let defaultType: EncounterType = 'both';
+    if (
+      walkPendingPins.targetPrayers > currentPrayers &&
+      walkPendingPins.targetServices <= currentServices
+    ) {
+      defaultType = 'prayer';
+    } else if (
+      walkPendingPins.targetServices > currentServices &&
+      walkPendingPins.targetPrayers <= currentPrayers
+    ) {
+      defaultType = 'service';
+    }
+
+    setActiveDropPinModal({
+      lat,
+      lng,
+      streetName: bestStreet,
+      firstName: '',
+      peopleCount: 1,
+      type: defaultType,
+      needCategories: [],
+      description: '',
+    });
+  };
+
+  const handleSaveDroppedPinModal = () => {
+    if (!activeDropPinModal || !walkPendingPins) return;
+    const validCount = Math.max(1, activeDropPinModal.peopleCount || 1);
+    const streetClean =
+      activeDropPinModal.streetName.trim() ||
+      walkPendingPins.walk.streetsWalked[0] ||
+      'Chillicothe Street';
+    const nameClean =
+      activeDropPinModal.firstName.trim() ||
+      (validCount > 1
+        ? `Group of ${validCount} Friends`
+        : 'Community Friend');
+    const descClean =
+      activeDropPinModal.description.trim() ||
+      (activeDropPinModal.type === 'service'
+        ? `Connected ${nameClean} to services on ${streetClean}`
+        : `Prayed with ${nameClean} on ${streetClean}`);
+
+    const newPin: EncounterPin = {
+      id: `pin-hist-${Date.now()}-${droppedPinsForWalk.length}`,
+      walkId: walkPendingPins.walk.id,
+      timestamp:
+        walkPendingPins.walk.startTime || new Date().toISOString(),
+      lat: activeDropPinModal.lat,
+      lng: activeDropPinModal.lng,
+      streetName: streetClean,
+      firstName: nameClean,
+      peopleCount: validCount,
+      description: descClean,
+      type: activeDropPinModal.type,
+      needCategories: activeDropPinModal.needCategories,
+      loggedByRecorder: currentUser.name,
+      groupMembers: walkPendingPins.walk.groupMembers,
+      syncStatus: navigator.onLine ? 'synced' : 'pending',
+    };
+
+    onSaveStandalonePin(newPin);
+    setDroppedPinsForWalk((prev) => [...prev, newPin]);
+    setActiveDropPinModal(null);
+  };
+
+  const handleDeleteDroppedPin = (pinId: string) => {
+    setDroppedPinsForWalk((prev) => prev.filter((p) => p.id !== pinId));
+    if (onDeletePin) {
+      onDeletePin(pinId);
+    }
+  };
+
+  const handleFinishPinDropping = () => {
+    const walk = walkPendingPins?.walk;
+    const pinCount = droppedPinsForWalk.length;
+    setWalkPendingPins(null);
+    setDroppedPinsForWalk([]);
+    setActiveDropPinModal(null);
+    resetWalkForm();
+    if (walk) {
+      setSavedToast(
+        `✅ Walk & ${pinCount} Encounter Pins Saved Successfully! Date: ${walk.date} • Distance: ${walk.milesWalked} mi • Volunteer Hours: ${walk.volunteerHours} hrs`
+      );
+      setTimeout(() => setSavedToast(null), 12000);
+    }
   };
 
   const handleSaveSinglePastPin = async (e: React.FormEvent) => {
@@ -879,7 +939,437 @@ export const HistoricalOutreachBuilder: React.FC<
         </div>
       )}
 
-      {entryMode === 'full_walk' ? (
+      {walkPendingPins ? (
+        <div className="p-4 sm:p-6 rounded-2xl bg-slateDark-950 border-2 border-amber-500/50 shadow-2xl space-y-4 animate-fadeIn">
+          {/* Header Banner */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[11px] font-black uppercase tracking-wider">
+                  ✓ Route Stored
+                </span>
+                <span className="text-slate-400 text-xs">
+                  • {walkPendingPins.walk.date} • {walkPendingPins.walk.milesWalked} mi
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-white mt-1 flex items-center gap-2">
+                <span>📍 Drop Pins for Encounters on Your Route</span>
+              </h3>
+              <p className="text-xs text-slate-300">
+                You indicated{' '}
+                <strong className="text-amber-300">
+                  {walkPendingPins.targetPrayers} prayers
+                </strong>{' '}
+                and{' '}
+                <strong className="text-emerald-300">
+                  {walkPendingPins.targetServices} service linkages
+                </strong>
+                . Click anywhere along your route on the map below to drop pins
+                where each encounter occurred.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleFinishPinDropping}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slateDark-950 font-black text-xs sm:text-sm shadow-lg flex items-center justify-center gap-1.5 shrink-0"
+            >
+              <Check className="w-4 h-4 stroke-[3]" />
+              <span>✓ Done Dropping Pins</span>
+            </button>
+          </div>
+
+          {/* Counter Status */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">
+                Total Dropped
+              </span>
+              <span className="text-sm sm:text-base font-black text-white">
+                {droppedPinsForWalk.length} of{' '}
+                {walkPendingPins.targetPrayers + walkPendingPins.targetServices}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+              <span className="text-amber-400 block text-[10px] uppercase font-bold">
+                Prayers Target
+              </span>
+              <span className="text-sm sm:text-base font-black text-amber-300">
+                {
+                  droppedPinsForWalk.filter(
+                    (p) => p.type === 'prayer' || p.type === 'both'
+                  ).length
+                }{' '}
+                / {walkPendingPins.targetPrayers}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+              <span className="text-emerald-400 block text-[10px] uppercase font-bold">
+                Services Target
+              </span>
+              <span className="text-sm sm:text-base font-black text-emerald-300">
+                {
+                  droppedPinsForWalk.filter(
+                    (p) =>
+                      p.type === 'service' ||
+                      p.type === 'both' ||
+                      (p.needCategories && p.needCategories.length > 0)
+                  ).length
+                }{' '}
+                / {walkPendingPins.targetServices}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+              <span className="text-phoenix-400 block text-[10px] uppercase font-bold">
+                Streets Covered
+              </span>
+              <span className="text-xs font-bold text-slate-200 truncate block">
+                {walkPendingPins.walk.streetsWalked.join(', ')}
+              </span>
+            </div>
+          </div>
+
+          {/* Dedicated Map */}
+          <div className="rounded-2xl overflow-hidden border-2 border-slate-800 h-80 sm:h-96 relative">
+            <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-[500] px-3.5 py-1.5 rounded-full bg-slateDark-950/95 backdrop-blur border border-amber-500/50 text-[11px] font-black text-amber-200 shadow-xl pointer-events-none text-center">
+              👇 Click on the map along the route to drop a pin
+            </div>
+
+            <MapContainer
+              center={
+                walkPendingPins.walk.startPoint
+                  ? [
+                      walkPendingPins.walk.startPoint.lat,
+                      walkPendingPins.walk.startPoint.lng,
+                    ]
+                  : CHILLICOTHE_CENTER
+              }
+              zoom={15}
+              scrollWheelZoom={true}
+              className="w-full h-full"
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <FitRouteBounds points={walkPendingPins.walk.gpsPath} />
+              <MapClickCapture onMapClick={handlePinMapClick} />
+
+              {/* Saved Route Path */}
+              <Polyline
+                positions={walkPendingPins.walk.gpsPath}
+                pathOptions={{
+                  color: '#10b981',
+                  weight: 5,
+                  opacity: 0.9,
+                  dashArray: '8, 6',
+                }}
+              />
+
+              {/* Start Point */}
+              {walkPendingPins.walk.startPoint && (
+                <Marker
+                  position={[
+                    walkPendingPins.walk.startPoint.lat,
+                    walkPendingPins.walk.startPoint.lng,
+                  ]}
+                  icon={startFinishIcon(true)}
+                >
+                  <Popup>
+                    <div className="text-xs font-bold text-slate-900">
+                      🏁 Start:{' '}
+                      {walkPendingPins.walk.startPoint.streetName}
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
+
+              {/* Dropped Encounter Pins */}
+              {droppedPinsForWalk.map((pin) => (
+                <Marker
+                  key={pin.id}
+                  position={[pin.lat, pin.lng]}
+                  icon={encounterPinIcon(pin.type)}
+                >
+                  <Popup>
+                    <div className="text-xs space-y-1 text-slate-900 font-sans">
+                      <div className="font-black text-sm">
+                        {pin.type === 'service'
+                          ? '🤝'
+                          : pin.type === 'both'
+                          ? '✨'
+                          : '🙏'}{' '}
+                        {pin.firstName}
+                        {(pin.peopleCount || 1) > 1 && (
+                          <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-900 font-extrabold text-[10px]">
+                            👥 {pin.peopleCount}
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-bold text-slate-700">
+                        {pin.streetName}
+                      </div>
+                      <div className="text-slate-600 italic">
+                        "{pin.description}"
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          </div>
+
+          {/* Modal / Dialog when a location is clicked */}
+          {activeDropPinModal && (
+            <div className="p-4 rounded-xl bg-slate-900 border-2 border-amber-400 shadow-2xl space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
+                <h4 className="text-xs sm:text-sm font-black text-amber-300 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-amber-400" />
+                  <span>
+                    Drop Encounter Pin #{droppedPinsForWalk.length + 1} at (
+                    {activeDropPinModal.lat.toFixed(4)},{' '}
+                    {activeDropPinModal.lng.toFixed(4)})
+                  </span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setActiveDropPinModal(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    First Name(s) of Person(s)
+                  </label>
+                  <input
+                    type="text"
+                    value={activeDropPinModal.firstName}
+                    onChange={(e) =>
+                      setActiveDropPinModal({
+                        ...activeDropPinModal,
+                        firstName: e.target.value,
+                      })
+                    }
+                    placeholder="e.g., Marcus, Sarah, or Friend"
+                    className="w-full px-3 py-1.5 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white"
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-amber-300 mb-1">
+                    👥 # People
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={activeDropPinModal.peopleCount}
+                    onChange={(e) =>
+                      setActiveDropPinModal({
+                        ...activeDropPinModal,
+                        peopleCount: Math.max(
+                          1,
+                          parseInt(e.target.value) || 1
+                        ),
+                      })
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white font-black text-center"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    Street Name
+                  </label>
+                  <input
+                    type="text"
+                    value={activeDropPinModal.streetName}
+                    onChange={(e) =>
+                      setActiveDropPinModal({
+                        ...activeDropPinModal,
+                        streetName: e.target.value,
+                      })
+                    }
+                    placeholder="e.g., East 7th Street"
+                    className="w-full px-3 py-1.5 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    Encounter Type
+                  </label>
+                  <select
+                    value={activeDropPinModal.type}
+                    onChange={(e) =>
+                      setActiveDropPinModal({
+                        ...activeDropPinModal,
+                        type: e.target.value as EncounterType,
+                      })
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white font-bold"
+                  >
+                    <option value="both">✨ Prayed + Linked to Service</option>
+                    <option value="prayer">🙏 Prayed With Only</option>
+                    <option value="service">🤝 Service Linkage Only</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                  Need / Service Categories Linked
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {NEED_CATEGORIES.map((cat) => {
+                    const selected =
+                      activeDropPinModal.needCategories.includes(cat.id);
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          const exists =
+                            activeDropPinModal.needCategories.includes(cat.id);
+                          setActiveDropPinModal({
+                            ...activeDropPinModal,
+                            needCategories: exists
+                              ? activeDropPinModal.needCategories.filter(
+                                  (id) => id !== cat.id
+                                )
+                              : [...activeDropPinModal.needCategories, cat.id],
+                          });
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          selected
+                            ? `${cat.colorClass}`
+                            : 'bg-slateDark-950 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {cat.emoji} {cat.shortLabel}
+                        {selected && (
+                          <Check className="w-3 h-3 inline ml-1" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                  Prayer Request / Service Connected Description
+                </label>
+                <input
+                  type="text"
+                  value={activeDropPinModal.description}
+                  onChange={(e) =>
+                    setActiveDropPinModal({
+                      ...activeDropPinModal,
+                      description: e.target.value,
+                    })
+                  }
+                  placeholder="e.g., Prayers for healing and family, connected with shelter"
+                  className="w-full px-3 py-1.5 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveDropPinModal(null)}
+                  className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDroppedPinModal}
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slateDark-950 font-black text-xs flex items-center gap-1.5 shadow"
+                >
+                  <Plus className="w-4 h-4 stroke-[3]" />
+                  <span>Save Pin to Route</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* List of Dropped Pins on this walk */}
+          {droppedPinsForWalk.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+              <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                <span>
+                  Encounter Pins Dropped on This Route (
+                  {droppedPinsForWalk.length})
+                </span>
+                <span className="text-slate-500 font-normal">
+                  Saved to walk record
+                </span>
+              </h4>
+              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                {droppedPinsForWalk.map((pin) => (
+                  <div
+                    key={pin.id}
+                    className="p-2 rounded-lg bg-slateDark-950 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div>
+                      <strong className="text-white">
+                        {pin.type === 'service'
+                          ? '🤝'
+                          : pin.type === 'both'
+                          ? '✨'
+                          : '🙏'}{' '}
+                        {pin.firstName}
+                      </strong>{' '}
+                      {(pin.peopleCount || 1) > 1 && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-[10px] mr-1">
+                          👥 {pin.peopleCount} People
+                        </span>
+                      )}
+                      <span className="text-phoenix-300">
+                        ({pin.streetName})
+                      </span>{' '}
+                      —{' '}
+                      <span className="text-slate-300">
+                        {pin.description}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDroppedPin(pin.id)}
+                      className="text-slate-400 hover:text-rose-400 p-1"
+                      title="Remove this pin"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Action Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+            <p className="text-xs text-slate-400">
+              When finished dropping pins for all encounters on this walk,
+              click Complete Walk.
+            </p>
+            <button
+              type="button"
+              onClick={handleFinishPinDropping}
+              className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slateDark-950 font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4 stroke-[3]" />
+              <span>✓ Done Dropping Pins (Complete Walk)</span>
+            </button>
+          </div>
+        </div>
+      ) : entryMode === 'full_walk' ? (
         <form
           onSubmit={handleSaveFullHistoricalWalk}
           noValidate
@@ -924,17 +1414,6 @@ export const HistoricalOutreachBuilder: React.FC<
                   }`}
                 >
                   👋 Drop Interaction ({interactionSpots.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMapClickMode('prayer_pin')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition ${
-                    mapClickMode === 'prayer_pin'
-                      ? 'bg-amber-500 text-slateDark-950 border-amber-300 shadow'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  🙏 Position Prayer Pin
                 </button>
               </div>
             </div>
@@ -1015,11 +1494,9 @@ export const HistoricalOutreachBuilder: React.FC<
                     ? '👆 Click the map to set your 🏁 Starting Point'
                     : !isLoopClosed
                     ? '👆 Click waypoints along your route (or click 🏁 Start marker / button above to return to Start)'
-                    : '✅ Loop closed back at Starting Point! You can still add Prayer Pins below.')}
+                    : '✅ Loop closed back at Starting Point! Proceed to volunteers & counters below.')}
                 {mapClickMode === 'interaction' &&
                   '👆 Click on the map where you had community interactions'}
-                {mapClickMode === 'prayer_pin' &&
-                  '👆 Click on the map to set the location for the Prayer Pin below'}
               </div>
 
               <MapContainer
@@ -1376,184 +1853,6 @@ export const HistoricalOutreachBuilder: React.FC<
             </div>
           </div>
 
-          {/* STEP 4: ADD PEOPLE PRAYED FOR / LINKED ON THIS PAST WALK */}
-          <div className="p-4 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-xs sm:text-sm font-extrabold text-amber-300 flex items-center gap-1.5">
-                  <HeartHandshake className="w-4 h-4" />
-                  <span>
-                    People Prayed For / Linked on This Past Walk (
-                    {draftPins.length} added)
-                  </span>
-                </h3>
-                <span className="text-[11px] text-slate-400">
-                  Optional — add each person you prayed for on this walk
-                </span>
-              </div>
-
-              {/* Toggle: Place Independently vs Snap to Walk Route */}
-              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setPinSnapToRoute(false)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
-                    !pinSnapToRoute
-                      ? 'bg-emerald-600 text-white shadow'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <MapPin className="w-3 h-3" />
-                  <span>Place Independently (Default)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPinSnapToRoute(true)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
-                    pinSnapToRoute
-                      ? 'bg-amber-500 text-slateDark-950 font-black shadow'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Route className="w-3 h-3" />
-                  <span>Snap to Walk Path</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <input
-                type="text"
-                value={pinFirstName}
-                onChange={(e) => setPinFirstName(e.target.value)}
-                placeholder="First Name(s) (e.g., Marcus)"
-                className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
-              />
-
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5">
-                <span className="text-[11px] font-bold text-amber-300 shrink-0">
-                  👥 # People:
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={pinPeopleCount}
-                  onChange={(e) =>
-                    setPinPeopleCount(Math.max(1, parseInt(e.target.value) || 1))
-                  }
-                  className="w-full bg-transparent text-xs font-black text-white focus:outline-none text-center"
-                />
-              </div>
-
-              <input
-                type="text"
-                value={pinStreet}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setPinStreet(val);
-                  setHasCustomClickedPinCoords(false);
-                  const resolved = resolveStreetCoordinatesSync(
-                    val,
-                    pinSnapToRoute ? routePoints : [],
-                    pinSnapToRoute ? waypointStreets : {},
-                    draftPins.map((d) => [d.lat, d.lng]),
-                    pinSnapToRoute
-                  );
-                  if (resolved) {
-                    setPinCoords(resolved);
-                  }
-                }}
-                placeholder="Street Name (e.g., E 2nd St, McArthur St)"
-                className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
-              />
-
-              <select
-                value={pinType}
-                onChange={(e) => setPinType(e.target.value as EncounterType)}
-                className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-bold"
-              >
-                <option value="both">✨ Prayed + Linked to Service</option>
-                <option value="prayer">🙏 Prayed With Only</option>
-                <option value="service">🤝 Service Linkage Only</option>
-              </select>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {NEED_CATEGORIES.map((cat) => {
-                const selected = pinNeeds.includes(cat.id);
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => handleTogglePinNeed(cat.id)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
-                      selected
-                        ? `${cat.colorClass}`
-                        : 'bg-slate-900 border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {cat.emoji} {cat.shortLabel}
-                    {selected && <Check className="w-3 h-3 inline ml-1" />}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                value={pinDescription}
-                onChange={(e) => setPinDescription(e.target.value)}
-                placeholder="Brief description of prayer request or service connected..."
-                className="flex-1 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
-              />
-              <button
-                type="button"
-                onClick={handleAddDraftPinToWalk}
-                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slateDark-950 font-extrabold text-xs flex items-center justify-center gap-1.5 shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Person to This Walk</span>
-              </button>
-            </div>
-
-            {draftPins.length > 0 && (
-              <div className="space-y-1.5 pt-2">
-                {draftPins.map((dp) => (
-                  <div
-                    key={dp.id}
-                    className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div>
-                      <strong className="text-white">🙏 {dp.firstName}</strong>{' '}
-                      {(dp.peopleCount || 1) > 1 && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-[10px] mr-1">
-                          👥 {dp.peopleCount} People
-                        </span>
-                      )}
-                      <span className="text-phoenix-300">
-                        ({dp.streetName})
-                      </span>{' '}
-                      — <span className="text-slate-300">{dp.description}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDraftPins((prev) =>
-                          prev.filter((item) => item.id !== dp.id)
-                        )
-                      }
-                      className="text-slate-400 hover:text-rose-400"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Walk Notes & Submit */}
           <div>
             <label className="block text-xs font-bold text-slate-300 mb-1">
@@ -1604,8 +1903,11 @@ export const HistoricalOutreachBuilder: React.FC<
           >
             <Save className="w-5 h-5" />
             <span>
-              Save Past Walk, Route ({milesWalked} mi) & {draftPins.length} Prayer
-              Pins to Cloud
+              {prayersCount > 0 || serviceLinkagesCount > 0
+                ? `Save Route & Drop Pins on Map (${
+                    prayersCount + serviceLinkagesCount
+                  } Encounters to Place) ➔`
+                : `Save Past Walk & Route (${milesWalked} mi) to Cloud`}
             </span>
           </button>
         </form>
