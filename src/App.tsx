@@ -389,6 +389,7 @@ export function App() {
               onAddNewPerson={handleAddNewPerson}
               lbsPerTrashBag={dbState.cloudConfig.lbsPerTrashBag}
               pins={dbState.pins}
+              walks={dbState.walks}
               onOpenLogin={() => setIsLoginModalOpen(true)}
               onSaveWalk={handleSaveWalk}
               onSaveHistoricalWalk={handleSaveHistoricalWalk}

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   Check,
+  Compass,
   ExternalLink,
   HeartHandshake,
   MapPin,
@@ -11,6 +12,7 @@ import {
   Navigation,
   PhoneCall,
   Plus,
+  Route,
   Sparkles,
   User,
   Users,
@@ -23,11 +25,14 @@ import {
   EncounterType,
   NEED_CATEGORIES,
   NeedCategoryId,
+  WalkSession,
 } from '../types/hopeDealers';
 import {
+  findClosestPointOnPath,
   forwardGeocodeStreetInChillicothe,
   resolveStreetCoordinatesSync,
   reverseGeocodeStreet,
+  snapCoordinateToNearestWalk,
 } from '../services/cloudSyncService';
 
 interface EncounterPinModalProps {
@@ -40,6 +45,8 @@ interface EncounterPinModalProps {
   lastKnownGps: [number, number] | null;
   editingPin?: EncounterPin | null;
   onSavePin: (pin: EncounterPin) => void;
+  availableWalks?: WalkSession[];
+  currentPath?: [number, number][];
 }
 
 export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
@@ -52,6 +59,8 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
   lastKnownGps,
   editingPin,
   onSavePin,
+  availableWalks = [],
+  currentPath = [],
 }) => {
   const [firstName, setFirstName] = useState('');
   const [peopleCount, setPeopleCount] = useState<number>(1);
@@ -63,6 +72,12 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
   const [coords, setCoords] = useState<[number, number]>(CHILLICOTHE_CENTER);
   const [locatingGps, setLocatingGps] = useState(false);
   const [isListeningVoice, setIsListeningVoice] = useState(false);
+
+  // Path Snapping vs Independent Placement State (Default: Place Independently)
+  const [snapToPath, setSnapToPath] = useState(false);
+  const [selectedWalkId, setSelectedWalkId] = useState<string>('nearest');
+  const [snapFeedback, setSnapFeedback] = useState<string | null>(null);
+  const independentCoordsRef = React.useRef<[number, number]>(CHILLICOTHE_CENTER);
 
   const prevIsOpenRef = React.useRef(false);
   const editingPinIdRef = React.useRef<string | null | undefined>(undefined);
@@ -92,16 +107,25 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       setStreetName(editingPin.streetName);
       setPinDate(editingPin.timestamp.slice(0, 10));
       setCoords([editingPin.lat, editingPin.lng]);
+      independentCoordsRef.current = [editingPin.lat, editingPin.lng];
+      setSnapToPath(Boolean(editingPin.snapToPath));
+      setSelectedWalkId(editingPin.snappedWalkId || 'nearest');
+      setSnapFeedback(
+        editingPin.snapToPath ? '✓ Snapped to Walk Path' : null
+      );
       return;
     }
 
-    // New pin initial setup
+    // New pin initial setup (Default: Place Independently)
     setFirstName('');
     setPeopleCount(1);
     setEncounterType('both');
     setSelectedNeeds([]);
     setDescription('');
     setPinDate(new Date().toISOString().slice(0, 10));
+    setSnapToPath(false);
+    setSelectedWalkId('nearest');
+    setSnapFeedback(null);
 
     const defaultStreet =
       currentWalkStreets.length > 0
@@ -111,6 +135,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
 
     if (lastKnownGps) {
       setCoords(lastKnownGps);
+      independentCoordsRef.current = lastKnownGps;
       void reverseGeocodeStreet(lastKnownGps[0], lastKnownGps[1]).then(
         (road) => {
           if (road) setStreetName(road);
@@ -123,6 +148,7 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
           setCoords([lat, lng]);
+          independentCoordsRef.current = [lat, lng];
           setLocatingGps(false);
           const road = await reverseGeocodeStreet(lat, lng);
           if (road) setStreetName(road);
@@ -132,16 +158,131 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             CHILLICOTHE_CENTER[0] + (Math.random() - 0.5) * 0.008;
           const jitterLng =
             CHILLICOTHE_CENTER[1] + (Math.random() - 0.5) * 0.008;
-          setCoords([
+          const fallback: [number, number] = [
             Number(jitterLat.toFixed(5)),
             Number(jitterLng.toFixed(5)),
-          ]);
+          ];
+          setCoords(fallback);
+          independentCoordsRef.current = fallback;
           setLocatingGps(false);
         },
         { enableHighAccuracy: true, timeout: 6000 }
       );
     }
   }, [isOpen, editingPin]);
+
+  // List of all candidate previous paths that user can snap to
+  const candidatePaths = useMemo(() => {
+    const list: Array<{ id: string; label: string }> = [];
+    if (currentPath && currentPath.length >= 2) {
+      list.push({
+        id: 'current',
+        label: `Active Current Walk Route (${currentPath.length} waypoints)`,
+      });
+    }
+    (availableWalks || []).forEach((w) => {
+      if (w.gpsPath && w.gpsPath.length >= 2) {
+        const streets =
+          w.streetsWalked.length > 0
+            ? w.streetsWalked.slice(0, 3).join(', ')
+            : 'Chillicothe Route';
+        list.push({
+          id: w.id,
+          label: `📅 ${w.date} • ${streets} (${w.milesWalked} mi)`,
+        });
+      }
+    });
+    return list;
+  }, [availableWalks, currentPath]);
+
+  // Snap the coordinate to a selected path or nearest path
+  const applyPathSnap = (baseCoords: [number, number], targetWalkId: string) => {
+    // 1. If targeting current active walk or nearest when active walk exists
+    if (
+      currentPath &&
+      currentPath.length >= 2 &&
+      (targetWalkId === 'current' || targetWalkId === 'nearest')
+    ) {
+      const res = findClosestPointOnPath(
+        baseCoords[0],
+        baseCoords[1],
+        currentPath
+      );
+      if (
+        res &&
+        (targetWalkId === 'current' ||
+          !availableWalks ||
+          availableWalks.length === 0)
+      ) {
+        setCoords(res.point);
+        const distFeet = Math.round(res.distanceMiles * 5280);
+        setSnapFeedback(
+          `✓ Snapped to Current Walk Path (~${distFeet} ft away)`
+        );
+        void reverseGeocodeStreet(res.point[0], res.point[1]).then((road) => {
+          if (road) setStreetName(road);
+        });
+        return;
+      }
+    }
+
+    // 2. Snap to candidate previous walks
+    const snapResult = snapCoordinateToNearestWalk(
+      baseCoords[0],
+      baseCoords[1],
+      availableWalks || [],
+      targetWalkId === 'current' ? undefined : targetWalkId
+    );
+
+    if (snapResult) {
+      setCoords(snapResult.snappedCoord);
+      const distFeet = Math.round(snapResult.distanceMiles * 5280);
+      const walkLabel = `${snapResult.walk.date} (${
+        snapResult.walk.streetsWalked.slice(0, 2).join(', ') || 'Route'
+      })`;
+      setSnapFeedback(`✓ Snapped to ${walkLabel} (~${distFeet} ft away)`);
+      void reverseGeocodeStreet(
+        snapResult.snappedCoord[0],
+        snapResult.snappedCoord[1]
+      ).then((road) => {
+        if (road) setStreetName(road);
+      });
+    } else if (currentPath && currentPath.length >= 2) {
+      const res = findClosestPointOnPath(
+        baseCoords[0],
+        baseCoords[1],
+        currentPath
+      );
+      if (res) {
+        setCoords(res.point);
+        const distFeet = Math.round(res.distanceMiles * 5280);
+        setSnapFeedback(
+          `✓ Snapped to Current Walk Path (~${distFeet} ft away)`
+        );
+        void reverseGeocodeStreet(res.point[0], res.point[1]).then((road) => {
+          if (road) setStreetName(road);
+        });
+      }
+    } else {
+      setSnapFeedback('No previous walking paths found to snap to.');
+    }
+  };
+
+  const handleToggleSnap = (snap: boolean) => {
+    setSnapToPath(snap);
+    if (!snap) {
+      // Revert to independent coordinates
+      setCoords(independentCoordsRef.current);
+      setSnapFeedback(null);
+    } else {
+      applyPathSnap(independentCoordsRef.current, selectedWalkId);
+    }
+  };
+
+  const handleSelectPathToSnap = (walkId: string) => {
+    setSelectedWalkId(walkId);
+    applyPathSnap(independentCoordsRef.current, walkId);
+  };
 
   if (!isOpen) return null;
 
@@ -278,7 +419,9 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
       loggedByRecorder: editingPin ? editingPin.loggedByRecorder : recorderName,
       groupMembers: editingPin ? editingPin.groupMembers : groupMembers,
       syncStatus: navigator.onLine ? 'synced' : 'pending',
-      manuallyRelocated: true,
+      manuallyRelocated: !snapToPath,
+      snapToPath,
+      snappedWalkId: snapToPath ? selectedWalkId : undefined,
       updatedAt: new Date().toISOString(),
     };
 
@@ -570,12 +713,12 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
             />
           </div>
 
-          {/* 5. Street & GPS Pin Location */}
-          <div className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-2.5">
+          {/* 5. Street & Pin Location */}
+          <div className="p-3.5 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-phoenix-400" />
-                <span>Street / Pin Location</span>
+                <span>5. Street & Pin Location</span>
               </span>
               <button
                 type="button"
@@ -589,6 +732,91 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
                     : `GPS (${coords[0].toFixed(4)}, ${coords[1].toFixed(4)})`}
                 </span>
               </button>
+            </div>
+
+            {/* Toggle: Place Independently vs Snap to Path */}
+            <div className="p-3 rounded-xl bg-slateDark-900 border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <Compass className="w-3.5 h-3.5 text-phoenix-400" />
+                  <span>Pin Placement Mode</span>
+                </label>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold uppercase ${
+                    snapToPath
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  }`}
+                >
+                  {snapToPath ? '🧲 Snapped to Path' : '📍 Independent Location'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleSnap(false)}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition ${
+                    !snapToPath
+                      ? 'bg-emerald-600 text-white border-emerald-400 shadow'
+                      : 'bg-slateDark-950 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Place Independently</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleSnap(true)}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition ${
+                    snapToPath
+                      ? 'bg-amber-500 text-slateDark-950 border-amber-400 font-extrabold shadow'
+                      : 'bg-slateDark-950 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Route className="w-3.5 h-3.5" />
+                  <span>Snap to Previous Path</span>
+                </button>
+              </div>
+
+              {/* Path Selector if Snap to Path is enabled */}
+              {snapToPath && (
+                <div className="pt-2 border-t border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Select Path to Snap To:</span>
+                    <span className="text-amber-300 font-bold text-[10px]">
+                      {candidatePaths.length} Available
+                    </span>
+                  </div>
+
+                  <select
+                    value={selectedWalkId}
+                    onChange={(e) => handleSelectPathToSnap(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slateDark-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="nearest">⚡ Nearest Walk Path (Auto-Detect)</option>
+                    {candidatePaths.map((cp) => (
+                      <option key={cp.id} value={cp.id}>
+                        {cp.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {snapFeedback && (
+                    <div className="text-[11px] text-emerald-300 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 font-medium">
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                      <span>{snapFeedback}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-400">
+                {!snapToPath
+                  ? 'Default: Place pin freely at your exact GPS spot or custom map coordinates without snapping to any route.'
+                  : 'Snaps pin coordinates directly onto the selected walking route line segment.'}
+              </p>
             </div>
 
             <input
@@ -609,12 +837,12 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
                   type="number"
                   step="any"
                   value={coords[0]}
-                  onChange={(e) =>
-                    setCoords([
-                      parseFloat(e.target.value) || CHILLICOTHE_CENTER[0],
-                      coords[1],
-                    ])
-                  }
+                  onChange={(e) => {
+                    const newLat =
+                      parseFloat(e.target.value) || CHILLICOTHE_CENTER[0];
+                    setCoords([newLat, coords[1]]);
+                    independentCoordsRef.current = [newLat, coords[1]];
+                  }}
                   className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white font-mono"
                 />
               </div>
@@ -626,12 +854,12 @@ export const EncounterPinModal: React.FC<EncounterPinModalProps> = ({
                   type="number"
                   step="any"
                   value={coords[1]}
-                  onChange={(e) =>
-                    setCoords([
-                      coords[0],
-                      parseFloat(e.target.value) || CHILLICOTHE_CENTER[1],
-                    ])
-                  }
+                  onChange={(e) => {
+                    const newLng =
+                      parseFloat(e.target.value) || CHILLICOTHE_CENTER[1];
+                    setCoords([coords[0], newLng]);
+                    independentCoordsRef.current = [coords[0], newLng];
+                  }}
                   className="w-full px-2.5 py-1.5 rounded bg-slateDark-900 border border-slate-700 text-xs text-white font-mono"
                 />
               </div>

@@ -985,6 +985,90 @@ function distancePointToSegmentMiles(
   return calculateDistanceMiles(lat, lng, projLat, projLng);
 }
 
+// Project coordinate onto a line segment
+export function findClosestPointOnSegment(
+  lat: number,
+  lng: number,
+  p1: [number, number],
+  p2: [number, number]
+): [number, number] {
+  const A = lat - p1[0];
+  const B = lng - p1[1];
+  const C = p2[0] - p1[0];
+  const D = p2[1] - p1[1];
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  const param = lenSq !== 0 ? Math.max(0, Math.min(1, dot / lenSq)) : 0;
+  const projLat = p1[0] + param * C;
+  const projLng = p1[1] + param * D;
+  return [Number(projLat.toFixed(6)), Number(projLng.toFixed(6))];
+}
+
+// Project coordinate onto the nearest segment of a polyline/path
+export function findClosestPointOnPath(
+  lat: number,
+  lng: number,
+  path: [number, number][]
+): { point: [number, number]; distanceMiles: number; segmentIndex: number } | null {
+  if (!path || path.length < 2) return null;
+  let bestPt: [number, number] = path[0];
+  let bestDist = Infinity;
+  let bestSegIdx = 0;
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const pt = findClosestPointOnSegment(lat, lng, path[i], path[i + 1]);
+    const dist = calculateDistanceMiles(lat, lng, pt[0], pt[1]);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPt = pt;
+      bestSegIdx = i;
+    }
+  }
+
+  return { point: bestPt, distanceMiles: bestDist, segmentIndex: bestSegIdx };
+}
+
+// Find closest point on candidate walk paths
+export function snapCoordinateToNearestWalk(
+  lat: number,
+  lng: number,
+  walks: WalkSession[],
+  targetWalkId?: string
+): {
+  snappedCoord: [number, number];
+  walk: WalkSession;
+  distanceMiles: number;
+} | null {
+  const candidateWalks = (walks || []).filter(
+    (w) =>
+      w.gpsPath &&
+      w.gpsPath.length >= 2 &&
+      (!targetWalkId || targetWalkId === 'nearest' || w.id === targetWalkId)
+  );
+  if (candidateWalks.length === 0) return null;
+
+  let bestResult: {
+    snappedCoord: [number, number];
+    walk: WalkSession;
+    distanceMiles: number;
+  } | null = null;
+  let minDistance = Infinity;
+
+  for (const walk of candidateWalks) {
+    const res = findClosestPointOnPath(lat, lng, walk.gpsPath);
+    if (res && res.distanceMiles < minDistance) {
+      minDistance = res.distanceMiles;
+      bestResult = {
+        snappedCoord: res.point,
+        walk,
+        distanceMiles: res.distanceMiles,
+      };
+    }
+  }
+
+  return bestResult;
+}
+
 export function applyAntiStackOffset(
   baseCoord: [number, number],
   existingCoords: Array<[number, number]>
@@ -1011,14 +1095,15 @@ export function resolveStreetCoordinatesSync(
   streetName: string,
   routePoints: [number, number][] = [],
   waypointStreets: Record<number, string> = {},
-  existingCoords: Array<[number, number]> = []
+  existingCoords: Array<[number, number]> = [],
+  forceSnapToRoute: boolean = false
 ): [number, number] | null {
   const key = normalizeStreetKey(streetName);
   if (!key) return null;
   const core = getCoreStreetName(streetName);
 
-  // PRIORITY 1: If the walk has a plotted route (routePoints.length >= 2), ALWAYS place the pin ON the walk's route segment for that street!
-  if (routePoints.length >= 2) {
+  // ONLY place the pin on the walk route if forceSnapToRoute is explicitly requested!
+  if (forceSnapToRoute && routePoints.length >= 2) {
     const segments = buildRouteSegments(routePoints, waypointStreets);
     if (segments.length > 0) {
       const allStreets = [
@@ -1052,7 +1137,7 @@ export function resolveStreetCoordinatesSync(
     }
   }
 
-  // PRIORITY 2: Standalone pin without a route — check Chillicothe dictionary
+  // Independent street coordinate — check Chillicothe dictionary
   const baseCoord =
     CHILLICOTHE_STREET_COORDS[key] || CHILLICOTHE_STREET_COORDS[core];
   if (baseCoord) {
@@ -1066,10 +1151,11 @@ export async function forwardGeocodeStreetInChillicothe(
   streetName: string,
   routePoints: [number, number][] = [],
   waypointStreets: Record<number, string> = {},
-  existingCoords: Array<[number, number]> = []
+  existingCoords: Array<[number, number]> = [],
+  forceSnapToRoute: boolean = false
 ): Promise<[number, number] | null> {
-  // If we have a walk route, reverse-geocode any un-cached route segment midpoints first so segment street matching is 100% exact!
-  if (routePoints.length >= 2) {
+  // If explicitly requested to snap to route:
+  if (forceSnapToRoute && routePoints.length >= 2) {
     const segments = buildRouteSegments(routePoints, waypointStreets);
     for (const seg of segments) {
       if (!seg.cachedCoreKey) {
@@ -1084,7 +1170,8 @@ export async function forwardGeocodeStreetInChillicothe(
       streetName,
       routePoints,
       waypointStreets,
-      existingCoords
+      existingCoords,
+      true
     );
     if (routeMatch) return routeMatch;
   }
@@ -1093,7 +1180,8 @@ export async function forwardGeocodeStreetInChillicothe(
     streetName,
     routePoints,
     waypointStreets,
-    existingCoords
+    existingCoords,
+    forceSnapToRoute
   );
   if (syncMatch) return syncMatch;
 

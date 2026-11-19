@@ -98,6 +98,8 @@ export interface EncounterPin {
   groupMembers: string[];
   syncStatus: 'synced' | 'pending';
   manuallyRelocated?: boolean;
+  snapToPath?: boolean;
+  snappedWalkId?: string;
   updatedAt?: string;
 }
 

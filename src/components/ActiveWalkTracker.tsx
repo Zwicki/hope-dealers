@@ -60,6 +60,7 @@ interface ActiveWalkTrackerProps {
   onAddNewPerson?: (name: string) => void;
   lbsPerTrashBag: number;
   pins: EncounterPin[];
+  walks?: WalkSession[];
   onOpenLogin: () => void;
   onSaveWalk: (walk: WalkSession) => void;
   onSaveHistoricalWalk?: (walk: WalkSession, newPins: EncounterPin[]) => void;
@@ -157,6 +158,7 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
   onAddNewPerson,
   lbsPerTrashBag,
   pins,
+  walks = [],
   onOpenLogin,
   onSaveWalk,
   onSaveHistoricalWalk,
@@ -1602,6 +1604,8 @@ export const ActiveWalkTracker: React.FC<ActiveWalkTrackerProps> = ({
         lastKnownGps={lastKnownGps}
         editingPin={editingPin}
         onSavePin={handlePinCreated}
+        availableWalks={walks}
+        currentPath={gpsPath}
       />
         </>
       )}

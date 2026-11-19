@@ -1288,6 +1288,7 @@ export const CommunityImpactMap: React.FC<CommunityImpactMapProps> = ({
         lastKnownGps={pickedCoords}
         editingPin={editingPin}
         onSavePin={onSavePin}
+        availableWalks={walks}
       />
 
       {/* Modal for Editing a Saved Walk */}

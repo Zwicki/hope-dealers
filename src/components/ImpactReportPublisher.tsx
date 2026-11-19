@@ -764,6 +764,7 @@ Our Hope Dealers teams have been out walking the streets of Chillicothe in group
           lastKnownGps={[editingPin.lat, editingPin.lng]}
           editingPin={editingPin}
           onSavePin={onSavePin}
+          availableWalks={walks}
         />
       )}
 

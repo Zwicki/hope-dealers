@@ -13,6 +13,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Compass,
   CornerUpLeft,
   Flag,
   Footprints,
@@ -168,6 +169,7 @@ interface DraftPrayerPin {
   streetName: string;
   lat: number;
   lng: number;
+  snapToPath?: boolean;
 }
 
 export const HistoricalOutreachBuilder: React.FC<
@@ -232,6 +234,7 @@ export const HistoricalOutreachBuilder: React.FC<
   const [pinCoords, setPinCoords] = useState<[number, number]>(
     CHILLICOTHE_CENTER
   );
+  const [pinSnapToRoute, setPinSnapToRoute] = useState<boolean>(false);
   const [hasCustomClickedPinCoords, setHasCustomClickedPinCoords] =
     useState<boolean>(false);
   const [standalonePinDate, setStandalonePinDate] = useState<string>(
@@ -394,20 +397,35 @@ export const HistoricalOutreachBuilder: React.FC<
     let resolvedLatLng: [number, number] | null = null;
     if (hasCustomClickedPinCoords) {
       resolvedLatLng = applyAntiStackOffset(pinCoords, existingDraftCoords);
-    } else {
+    } else if (pinSnapToRoute && routePoints.length >= 2) {
+      // User explicitly enabled Snap to Walk Path!
       resolvedLatLng = await forwardGeocodeStreetInChillicothe(
         targetStreet,
         routePoints,
         waypointStreets,
-        existingDraftCoords
+        existingDraftCoords,
+        true
       );
       if (!resolvedLatLng) {
         const fallbackBase =
-          routePoints.length > 0
-            ? routePoints[draftPins.length % routePoints.length]
-            : pinCoords;
+          routePoints[draftPins.length % routePoints.length];
         resolvedLatLng = applyAntiStackOffset(
           fallbackBase,
+          existingDraftCoords
+        );
+      }
+    } else {
+      // Default: Place Independently without snapping to route!
+      resolvedLatLng = await forwardGeocodeStreetInChillicothe(
+        targetStreet,
+        [],
+        {},
+        existingDraftCoords,
+        false
+      );
+      if (!resolvedLatLng) {
+        resolvedLatLng = applyAntiStackOffset(
+          pinCoords,
           existingDraftCoords
         );
       }
@@ -432,6 +450,7 @@ export const HistoricalOutreachBuilder: React.FC<
       streetName: targetStreet,
       lat: resolvedLatLng[0],
       lng: resolvedLatLng[1],
+      snapToPath: pinSnapToRoute,
     };
 
     const nextDrafts = [...draftPins, newDraft];
@@ -520,16 +539,25 @@ export const HistoricalOutreachBuilder: React.FC<
       );
       const autoCoord = hasCustomClickedPinCoords
         ? applyAntiStackOffset(pinCoords, existingCoords)
-        : (await forwardGeocodeStreetInChillicothe(
+        : pinSnapToRoute && finalRoute.length >= 2
+        ? (await forwardGeocodeStreetInChillicothe(
             targetStreet,
             finalRoute,
             waypointStreets,
-            existingCoords
+            existingCoords,
+            true
           )) ||
           applyAntiStackOffset(
             finalRoute[allDraftPins.length % finalRoute.length] ?? pinCoords,
             existingCoords
-          );
+          )
+        : (await forwardGeocodeStreetInChillicothe(
+            targetStreet,
+            [],
+            {},
+            existingCoords,
+            false
+          )) || applyAntiStackOffset(pinCoords, existingCoords);
 
       allDraftPins.push({
         id: `draft-pin-auto-${Date.now()}`,
@@ -541,6 +569,7 @@ export const HistoricalOutreachBuilder: React.FC<
         streetName: targetStreet,
         lat: autoCoord[0],
         lng: autoCoord[1],
+        snapToPath: pinSnapToRoute,
       });
     }
 
@@ -561,9 +590,10 @@ export const HistoricalOutreachBuilder: React.FC<
       if (isStackedWithPrev) {
         const streetResolved = await forwardGeocodeStreetInChillicothe(
           dp.streetName,
-          finalRoute,
-          waypointStreets,
-          placedPinCoords
+          dp.snapToPath ? finalRoute : [],
+          dp.snapToPath ? waypointStreets : {},
+          placedPinCoords,
+          Boolean(dp.snapToPath)
         );
         if (streetResolved) {
           finalLat = streetResolved[0];
@@ -596,6 +626,8 @@ export const HistoricalOutreachBuilder: React.FC<
         loggedByRecorder: currentUser.name,
         groupMembers,
         syncStatus: navigator.onLine ? 'synced' : 'pending',
+        manuallyRelocated: !dp.snapToPath,
+        snapToPath: dp.snapToPath,
       });
     }
 
@@ -1295,17 +1327,47 @@ export const HistoricalOutreachBuilder: React.FC<
 
           {/* STEP 4: ADD PEOPLE PRAYED FOR / LINKED ON THIS PAST WALK */}
           <div className="p-4 rounded-xl bg-slateDark-950 border border-slate-800 space-y-3.5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs sm:text-sm font-extrabold text-amber-300 flex items-center gap-1.5">
-                <HeartHandshake className="w-4 h-4" />
-                <span>
-                  People Prayed For / Linked on This Past Walk (
-                  {draftPins.length} added)
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-amber-300 flex items-center gap-1.5">
+                  <HeartHandshake className="w-4 h-4" />
+                  <span>
+                    People Prayed For / Linked on This Past Walk (
+                    {draftPins.length} added)
+                  </span>
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  Optional — add each person you prayed for on this walk
                 </span>
-              </h3>
-              <span className="text-[11px] text-slate-400">
-                Optional — add each person you prayed for on this walk
-              </span>
+              </div>
+
+              {/* Toggle: Place Independently vs Snap to Walk Route */}
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setPinSnapToRoute(false)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
+                    !pinSnapToRoute
+                      ? 'bg-emerald-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <MapPin className="w-3 h-3" />
+                  <span>Place Independently (Default)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPinSnapToRoute(true)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
+                    pinSnapToRoute
+                      ? 'bg-amber-500 text-slateDark-950 font-black shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Route className="w-3 h-3" />
+                  <span>Snap to Walk Path</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -1342,9 +1404,10 @@ export const HistoricalOutreachBuilder: React.FC<
                   setHasCustomClickedPinCoords(false);
                   const resolved = resolveStreetCoordinatesSync(
                     val,
-                    routePoints,
-                    waypointStreets,
-                    draftPins.map((d) => [d.lat, d.lng])
+                    pinSnapToRoute ? routePoints : [],
+                    pinSnapToRoute ? waypointStreets : {},
+                    draftPins.map((d) => [d.lat, d.lng]),
+                    pinSnapToRoute
                   );
                   if (resolved) {
                     setPinCoords(resolved);
